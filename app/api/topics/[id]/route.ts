@@ -71,7 +71,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
     // Run upsert + optional side effects concurrently
     const ops: Promise<unknown>[] = [
-      supabase.from('user_topic_progress').upsert(updateData, { onConflict: 'user_id,topic_id' })
+      supabase.from('user_topic_progress').upsert(updateData, { onConflict: 'user_id,topic_id' }).then(r => r)
     ]
 
     if (study_time && study_time > 0) {
@@ -79,12 +79,12 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
         user_id: user.id, subject_id, topic_id: id,
         duration: study_time,
         session_date: new Date().toISOString().split('T')[0]
-      }))
+      }).then(r => r))
     }
 
     if (isFirstComplete) {
       const xpGained = calculateXP('topic_complete')
-      ops.push(supabase.from('profiles').update({ xp: currentXP + xpGained }).eq('id', user.id))
+      ops.push(supabase.from('profiles').update({ xp: currentXP + xpGained }).eq('id', user.id).then(r => r))
     }
 
     const results = await Promise.all(ops)

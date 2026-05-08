@@ -122,7 +122,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       const xpGained = calculateXP('test_complete', accuracy)
 
       // Fire all DB writes in parallel
-      const writeOps: Promise<unknown>[] = [
+      const writeOps: PromiseLike<unknown>[] = [
         supabase.from('attempt_answers').insert(answerRecords),
         supabase.from('test_attempts').update({
           score,
