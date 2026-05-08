@@ -42,7 +42,7 @@ const DIFF_COLOR: Record<string, string> = {
 
 /* ── Helper: chapter progress from subtopics ────────────────── */
 function subtopicProgress(subtopics: Subtopic[]) {
-  if (!subtopics.length) return 0
+  if (!subtopics.length) return { done: 0, total: 0, pct: 0 }
   const done = subtopics.filter(s => s.is_completed).length
   return { done, total: subtopics.length, pct: Math.round((done / subtopics.length) * 100) }
 }

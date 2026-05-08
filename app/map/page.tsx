@@ -17,8 +17,8 @@ interface Node {
   why_it_matters: string
   x?: number
   y?: number
-  fx?: number | null
-  fy?: number | null
+  fx?: number
+  fy?: number
 }
 
 interface Link {
