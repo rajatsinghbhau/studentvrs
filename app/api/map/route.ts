@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
     // For this prototype, we return the highly curated structure to meet the advanced UX spec
     
     // Process unlocks & prerequisites
-    const nodesMap = new Map(MOCK_GRAPH.nodes.map(n => [n.id, { ...n, unlocks: [], prerequisites: [] }]))
+    const nodesMap = new Map(MOCK_GRAPH.nodes.map(n => [n.id, { ...n, unlocks: [] as string[], prerequisites: [] as string[] }]))
     
     MOCK_GRAPH.links.forEach(l => {
       const src = nodesMap.get(l.source)
