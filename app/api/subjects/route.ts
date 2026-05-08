@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { supabase, getAuthUser } from '@/lib/supabase'
+import { supabase, supabaseAdmin, getAuthUser } from '@/lib/supabase'
 import { successResponse, errorResponse, unauthorizedResponse } from '@/lib/utils'
 
 export async function GET(request: NextRequest) {
@@ -10,9 +10,10 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const examType = searchParams.get('exam') || 'JEE'
 
-    // Fetch subjects and user progress in parallel
+    // Fetch subjects+topics via admin (bypasses RLS on curriculum tables)
+    // and user progress via anon client (RLS enforces per-user scope)
     const [subjectsRes, progressRes] = await Promise.all([
-      supabase
+      supabaseAdmin
         .from('subjects')
         .select('id, name, icon, color, total_topics, topics(id, name, difficulty, weightage, chapter_num)')
         .or(`exam_type.eq.${examType},exam_type.eq.ALL`)

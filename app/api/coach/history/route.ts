@@ -2,6 +2,9 @@ import { NextRequest } from 'next/server'
 import { supabase, getAuthUser } from '@/lib/supabase'
 import { successResponse, errorResponse, unauthorizedResponse } from '@/lib/utils'
 
+export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
+
 // GET /api/coach/history — get chat history
 export async function GET(request: NextRequest) {
   try {

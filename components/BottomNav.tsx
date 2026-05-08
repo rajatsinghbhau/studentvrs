@@ -6,7 +6,8 @@ const navItems = [
   { href: '/dashboard', icon: '🏠', label: 'Home' },
   { href: '/learn', icon: '📚', label: 'Learn' },
   { href: '/tests', icon: '🎯', label: 'Tests' },
-  { href: '/revision', icon: '🔄', label: 'Revise' },
+  { href: '/explain', icon: '🔍', label: 'Explain' },
+  { href: '/visualize', icon: '🌌', label: '3D' },
   { href: '/coach', icon: '🤖', label: 'AI Coach' },
 ]
 

@@ -3,6 +3,10 @@ import { supabase, getAuthUser } from '@/lib/supabase'
 import { generateAIResponse } from '@/lib/gemini'
 import { successResponse, errorResponse, unauthorizedResponse } from '@/lib/utils'
 
+export const dynamic = 'force-dynamic'
+export const fetchCache = 'force-no-store'
+export const revalidate = 0
+
 // POST /api/coach/chat — send message to AI coach
 export async function POST(request: NextRequest) {
   try {
@@ -11,9 +15,11 @@ export async function POST(request: NextRequest) {
 
     const { message, context } = await request.json()
 
-    if (!message || message.trim().length === 0) {
+    if (!message || typeof message !== 'string' || message.trim().length === 0) {
       return errorResponse('Message cannot be empty')
     }
+
+    const trimmedMessage = message.trim()
 
     // Get user profile
     const { data: profile } = await supabase
@@ -22,13 +28,14 @@ export async function POST(request: NextRequest) {
       .eq('id', user.id)
       .single()
 
-    // Get recent chat history (last 10 messages)
+    // Get recent chat history BEFORE saving the new user message
+    // This ensures the history passed to AI doesn't include the current message
     const { data: history } = await supabase
       .from('coach_messages')
       .select('role, content')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
-      .limit(10)
+      .limit(12)
 
     const chatHistory = (history || []).reverse()
 
@@ -50,37 +57,44 @@ export async function POST(request: NextRequest) {
       .limit(1)
       .single()
 
-    // Save user message
-    await supabase.from('coach_messages').insert({
-      user_id: user.id,
-      role: 'user',
-      content: message,
-      context_topic: context?.topic
-    })
-
-    // Generate AI response
-    const aiResponse = await generateAIResponse(message, {
+    // Generate AI response FIRST (before saving to avoid including current msg in history)
+    const aiResponse = await generateAIResponse(trimmedMessage, {
       userName: profile?.name,
-      weakTopics: weakTopics?.map(wt => (wt.topics as { name?: string } | null)?.name || '') || [],
+      weakTopics: weakTopics?.map(wt => (wt.topics as { name?: string } | null)?.name || '').filter(Boolean) || [],
       recentScore: lastAttempt?.accuracy,
       currentSubject: context?.subject,
       chatHistory
     })
 
-    // Save AI response
-    await supabase.from('coach_messages').insert({
-      user_id: user.id,
-      role: 'assistant',
-      content: aiResponse,
-      context_topic: context?.topic
-    })
+    // Now save both messages (user first, then assistant)
+    await supabase.from('coach_messages').insert([
+      {
+        user_id: user.id,
+        role: 'user',
+        content: trimmedMessage,
+        context_topic: context?.topic
+      },
+      {
+        user_id: user.id,
+        role: 'assistant',
+        content: aiResponse,
+        context_topic: context?.topic
+      }
+    ])
 
     return successResponse({
       message: aiResponse,
       timestamp: new Date().toISOString()
     })
-  } catch (err) {
+  } catch (err: any) {
     console.error('Coach chat error:', err)
-    return errorResponse('AI coach is temporarily unavailable. Please try again.', 500)
+
+    if (err.isQuotaError || err.message?.includes('429') || err.message?.includes('quota') || err.message?.includes('RESOURCE_EXHAUSTED')) {
+      return errorResponse('Gemini free quota reached for today. Please wait a few minutes and try again.', 429)
+    }
+    if (err.message?.includes('API_KEY') || err.message?.includes('invalid')) {
+      return errorResponse('AI service configuration error. Please contact support.', 500)
+    }
+    return errorResponse(`AI coach error: ${err.message || 'Please try again.'}`, 500)
   }
 }

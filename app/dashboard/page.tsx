@@ -100,6 +100,20 @@ export default function DashboardPage() {
           ))}
         </div>
 
+        {/* Knowledge Map Banner */}
+        <Link href="/map" style={{ textDecoration: 'none' }}>
+          <div className="glass-card" style={{ padding: '20px', marginBottom: '24px', background: 'linear-gradient(135deg, rgba(0,242,255,0.05) 0%, rgba(119,1,208,0.1) 100%)', border: '1px solid rgba(0,242,255,0.2)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <div style={{ fontSize: '32px' }}>🧠</div>
+              <div>
+                <h3 style={{ margin: '0 0 4px 0', fontSize: '1.1rem', color: '#fff' }}>Knowledge Gap Map</h3>
+                <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--on-surface-variant)' }}>Visualize your brain's dependency graph and fix weak spots.</p>
+              </div>
+              <div style={{ marginLeft: 'auto', color: 'var(--primary)' }}>→</div>
+            </div>
+          </div>
+        </Link>
+
         {/* Subjects Progress */}
         <div className="section">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
