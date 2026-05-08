@@ -70,7 +70,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     }
 
     // Run upsert + optional side effects concurrently
-    const ops: Promise<unknown>[] = [
+    const ops: any[] = [
       supabase.from('user_topic_progress').upsert(updateData, { onConflict: 'user_id,topic_id' })
     ]
 
