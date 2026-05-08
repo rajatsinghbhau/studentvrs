@@ -164,7 +164,7 @@ export default function TestsPage() {
                     key={s.label}
                     onClick={() => setSubject(s.label)}
                     style={{
-                      padding: '14px 12px', borderRadius: '12px', border: 'none',
+                      padding: '14px 12px', borderRadius: '12px',
                       background: subject === s.label
                         ? `linear-gradient(135deg, ${s.color}22, ${s.color}11)`
                         : 'rgba(255,255,255,0.03)',
@@ -199,7 +199,7 @@ export default function TestsPage() {
                     key={d}
                     onClick={() => setDifficulty(d)}
                     style={{
-                      flex: 1, padding: '10px 0', borderRadius: '10px', border: 'none',
+                      flex: 1, padding: '10px 0', borderRadius: '10px',
                       background: difficulty === d ? `${diffColor(d)}22` : 'rgba(255,255,255,0.03)',
                       border: `1px solid ${difficulty === d ? diffColor(d) + '66' : 'rgba(255,255,255,0.08)'}`,
                       color: difficulty === d ? diffColor(d) : 'rgba(255,255,255,0.5)',
@@ -225,7 +225,7 @@ export default function TestsPage() {
                     key={n}
                     onClick={() => setCount(n)}
                     style={{
-                      padding: '8px 16px', borderRadius: '20px', border: 'none',
+                      padding: '8px 16px', borderRadius: '20px',
                       background: count === n ? 'rgba(0,242,255,0.15)' : 'rgba(255,255,255,0.04)',
                       border: `1px solid ${count === n ? 'rgba(0,242,255,0.4)' : 'rgba(255,255,255,0.08)'}`,
                       color: count === n ? 'rgba(0,242,255,0.9)' : 'rgba(255,255,255,0.5)',
@@ -304,7 +304,7 @@ export default function TestsPage() {
               disabled={generating}
               style={{
                 width: '100%', padding: '16px',
-                borderRadius: '14px', border: 'none', cursor: generating ? 'not-allowed' : 'pointer',
+                borderRadius: '14px', cursor: generating ? 'not-allowed' : 'pointer',
                 background: generating
                   ? 'rgba(255,255,255,0.06)'
                   : 'linear-gradient(135deg, rgba(0,242,255,0.25), rgba(119,1,208,0.3))',

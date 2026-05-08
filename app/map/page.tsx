@@ -100,8 +100,8 @@ export default function KnowledgeMapPage() {
   }, [selectedNode, focusMode, data, highlightNodes, highlightLinks])
 
   // Click Interaction
-  const handleNodeClick = useCallback((node: Node) => {
-    setSelectedNode(node)
+  const handleNodeClick = useCallback((node: any) => {
+    setSelectedNode(node as Node)
     setAiExplanation('')
     if (fgRef.current) {
       fgRef.current.centerAt(node.x, node.y, 800)

@@ -169,7 +169,7 @@ export default function TestTakingPage() {
             {test.questions.map((_, i) => (
               <button key={i} onClick={() => setCurrent(i)}
                 style={{
-                  width: '32px', height: '32px', borderRadius: '6px', border: 'none',
+                  width: '32px', height: '32px', borderRadius: '6px',
                   background: i === current ? 'var(--primary)' : answers[test.questions[i].id] !== undefined 
                     ? 'rgba(74,222,128,0.2)' : 'var(--surface-container)',
                   color: i === current ? '#000' : 'var(--on-surface)',

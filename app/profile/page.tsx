@@ -125,7 +125,7 @@ export default function ProfilePage() {
             <h3 style={{ marginBottom: '16px' }}>Achievements 🏆</h3>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
               {achievements.map(a => (
-                <div key={a.id} style={{
+                <div key={a.title} style={{
                   padding: '10px 14px', borderRadius: 'var(--radius-md)',
                   background: a.unlocked ? 'var(--primary-container)' : 'var(--surface-container)',
                   border: `1px solid ${a.unlocked ? 'rgba(0,242,255,0.3)' : 'var(--glass-border)'}`,
