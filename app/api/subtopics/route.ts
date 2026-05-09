@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server'
 import { supabase, supabaseAdmin, getAuthUser } from '@/lib/supabase'
 import { successResponse, errorResponse, unauthorizedResponse } from '@/lib/utils'
 
+export const dynamic = 'force-dynamic'
+
 // GET /api/subtopics?topicId=xxx  — list subtopics with user progress
 export async function GET(request: NextRequest) {
   try {

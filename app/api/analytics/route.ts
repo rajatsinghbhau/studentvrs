@@ -1,11 +1,17 @@
 import { NextRequest } from 'next/server'
-import { supabase, getAuthUser } from '@/lib/supabase'
+import { supabase, getAuthUser, createUserClient } from '@/lib/supabase'
 import { successResponse, errorResponse, unauthorizedResponse } from '@/lib/utils'
 
 export async function GET(request: NextRequest) {
   try {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader) return unauthorizedResponse()
+    const token = authHeader.replace('Bearer ', '')
+
     const user = await getAuthUser(request)
     if (!user) return unauthorizedResponse()
+
+    const userClient = createUserClient(token)
 
     const { searchParams } = new URL(request.url)
     const period = searchParams.get('period') || '30'
@@ -15,12 +21,12 @@ export async function GET(request: NextRequest) {
 
     // Fetch everything in parallel
     const [sessionsRes, attemptsRes, weakTopicsRes, profileRes, cardsRes, completedTopicsRes] = await Promise.all([
-      supabase.from('study_sessions').select('duration, session_date, subject_id, subjects(name, color, icon)').eq('user_id', user.id).gte('session_date', startDate).order('session_date'),
-      supabase.from('test_attempts').select('score, max_score, accuracy, completed_at, tests(title, subjects(name, color))').eq('user_id', user.id).eq('status', 'COMPLETED').gte('completed_at', daysAgo.toISOString()).order('completed_at'),
-      supabase.from('user_topic_progress').select('mastery_level, topics(name, subject_id, subjects(name, color))').eq('user_id', user.id).lt('mastery_level', 50).order('mastery_level', { ascending: true }).limit(10),
-      supabase.from('profiles').select('streak, longest_streak, xp, level, rank_title').eq('id', user.id).single(),
-      supabase.from('revision_cards').select('*', { count: 'exact', head: true }).eq('user_id', user.id).gt('repetitions', 0),
-      supabase.from('user_topic_progress').select('*', { count: 'exact', head: true }).eq('user_id', user.id).eq('is_completed', true)
+      userClient.from('study_sessions').select('duration, session_date, subject_id, subjects(name, color, icon)').eq('user_id', user.id).gte('session_date', startDate).order('session_date'),
+      userClient.from('test_attempts').select('score, max_score, accuracy, completed_at, tests(title, subjects(name, color))').eq('user_id', user.id).eq('status', 'COMPLETED').gte('completed_at', daysAgo.toISOString()).order('completed_at'),
+      userClient.from('user_topic_progress').select('mastery_level, topics(name, subject_id, subjects(name, color))').eq('user_id', user.id).lt('mastery_level', 50).order('mastery_level', { ascending: true }).limit(10),
+      userClient.from('profiles').select('streak, longest_streak, xp, level, rank_title').eq('id', user.id).single(),
+      userClient.from('revision_cards').select('*', { count: 'exact', head: true }).eq('user_id', user.id).gt('repetitions', 0),
+      userClient.from('user_topic_progress').select('*', { count: 'exact', head: true }).eq('user_id', user.id).eq('is_completed', true)
     ])
 
     const sessions = sessionsRes.data || []

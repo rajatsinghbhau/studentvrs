@@ -20,14 +20,21 @@ export default function TestTakingPage() {
 
   const submitTest = useCallback(async () => {
     setSubmitting(true)
-    const res = await fetch(`/api/tests/${id}/attempt`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ action: 'submit', answers, attempt_id: attemptId, time_taken: (test?.duration || 60) * 60 - timeLeft })
-    })
-    const data = await res.json()
-    if (data.success) {
-      router.push(`/tests/${id}/results?attemptId=${attemptId}`)
+    try {
+      const res = await fetch(`/api/tests/${id}/attempt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'submit', answers, attempt_id: attemptId, time_taken: (test?.duration || 60) * 60 - timeLeft })
+      })
+      const data = await res.json()
+      if (data.success) {
+        const finalAttemptId = data.data?.attempt_id || attemptId
+        router.push(`/tests/${id}/results?attemptId=${finalAttemptId}`)
+      } else {
+        alert(data.error || 'Failed to submit test')
+      }
+    } catch (e) {
+      alert('Error submitting test')
     }
     setSubmitting(false)
   }, [id, token, answers, attemptId, timeLeft, test, router])

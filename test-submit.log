@@ -1,0 +1,46 @@
+{
+  "answers": {
+    "b7030e6c-ffa6-4103-8ed7-e4420e34b2f8": 1,
+    "bc112953-f12e-4e16-853e-88414d8a4c5e": 2,
+    "9df59a2b-57c8-48f0-9f44-7e903b5ca223": 1,
+    "36c946bc-a25f-4e97-8a86-422102750cd4": 1,
+    "b9579f0f-9574-422d-997c-c5e95ba3acca": 3
+  },
+  "questions": [
+    {
+      "id": "b7030e6c-ffa6-4103-8ed7-e4420e34b2f8",
+      "correct_option": 1,
+      "marks": 4,
+      "negative_marks": 1,
+      "topic_id": null
+    },
+    {
+      "id": "bc112953-f12e-4e16-853e-88414d8a4c5e",
+      "correct_option": 1,
+      "marks": 4,
+      "negative_marks": 1,
+      "topic_id": null
+    },
+    {
+      "id": "9df59a2b-57c8-48f0-9f44-7e903b5ca223",
+      "correct_option": 0,
+      "marks": 4,
+      "negative_marks": 1,
+      "topic_id": null
+    },
+    {
+      "id": "36c946bc-a25f-4e97-8a86-422102750cd4",
+      "correct_option": 1,
+      "marks": 4,
+      "negative_marks": 1,
+      "topic_id": null
+    },
+    {
+      "id": "b9579f0f-9574-422d-997c-c5e95ba3acca",
+      "correct_option": 0,
+      "marks": 4,
+      "negative_marks": 1,
+      "topic_id": null
+    }
+  ]
+}

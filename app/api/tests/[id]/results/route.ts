@@ -1,13 +1,19 @@
 import { NextRequest } from 'next/server'
-import { supabase, getAuthUser } from '@/lib/supabase'
+import { supabase, getAuthUser, createUserClient } from '@/lib/supabase'
 import { successResponse, errorResponse, unauthorizedResponse } from '@/lib/utils'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
 export async function GET(request: NextRequest, { params }: RouteContext) {
   try {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader) return unauthorizedResponse()
+    const token = authHeader.replace('Bearer ', '')
+
     const user = await getAuthUser(request)
     if (!user) return unauthorizedResponse()
+
+    const userClient = createUserClient(token)
 
     const { id: testId } = await params
     const { searchParams } = new URL(request.url)
@@ -16,7 +22,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     // Fetch attempt, test, questions in parallel
     const [attemptRes, testRes, questionsRes] = await Promise.all([
       (async () => {
-        let q = supabase
+        let q = userClient
           .from('test_attempts')
           .select('*')
           .eq('user_id', user.id)
@@ -36,8 +42,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 
     // Fetch answers and all attempt history in parallel
     const [answersRes, allAttemptsRes] = await Promise.all([
-      supabase.from('attempt_answers').select('*').eq('attempt_id', attempt.id),
-      supabase.from('test_attempts').select('id, score, accuracy, completed_at').eq('user_id', user.id).eq('test_id', testId).eq('status', 'COMPLETED').order('completed_at')
+      userClient.from('attempt_answers').select('*').eq('attempt_id', attempt.id),
+      userClient.from('test_attempts').select('id, score, accuracy, completed_at').eq('user_id', user.id).eq('test_id', testId).eq('status', 'COMPLETED').order('completed_at')
     ])
 
     const answerMap = new Map((answersRes.data || []).map(a => [a.question_id, a]))

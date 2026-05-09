@@ -1,12 +1,20 @@
 import { NextRequest } from 'next/server'
-import { supabase, getAuthUser } from '@/lib/supabase'
+import { supabase, getAuthUser, createUserClient } from '@/lib/supabase'
 import { successResponse, errorResponse, unauthorizedResponse } from '@/lib/utils'
+
+export const dynamic = 'force-dynamic'
 
 // GET /api/tests — list all available tests
 export async function GET(request: NextRequest) {
   try {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader) return unauthorizedResponse()
+    const token = authHeader.replace('Bearer ', '')
+
     const user = await getAuthUser(request)
     if (!user) return unauthorizedResponse()
+
+    const userClient = createUserClient(token)
 
     const { searchParams } = new URL(request.url)
     const subjectId = searchParams.get('subjectId')
@@ -30,7 +38,7 @@ export async function GET(request: NextRequest) {
 
     // Get user's attempt history
     const testIds = tests?.map(t => t.id) || []
-    const { data: attempts } = await supabase
+    const { data: attempts } = await userClient
       .from('test_attempts')
       .select('test_id, score, max_score, accuracy, completed_at, status')
       .eq('user_id', user.id)

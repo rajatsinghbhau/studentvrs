@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { supabase, getAuthUser } from '@/lib/supabase'
+import { supabase, getAuthUser, createUserClient } from '@/lib/supabase'
 import { successResponse, errorResponse, unauthorizedResponse } from '@/lib/utils'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -7,8 +7,14 @@ type RouteContext = { params: Promise<{ id: string }> }
 // GET /api/tests/[id] — get test with questions (for taking the test)
 export async function GET(request: NextRequest, { params }: RouteContext) {
   try {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader) return unauthorizedResponse()
+    const token = authHeader.replace('Bearer ', '')
+
     const user = await getAuthUser(request)
     if (!user) return unauthorizedResponse()
+
+    const userClient = createUserClient(token)
 
     const { id } = await params
 
@@ -25,7 +31,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     if (error || !test) return errorResponse('Test not found', 404)
 
     // Check if user has an in-progress attempt
-    const { data: inProgressAttempt } = await supabase
+    const { data: inProgressAttempt } = await userClient
       .from('test_attempts')
       .select('id, started_at')
       .eq('user_id', user.id)

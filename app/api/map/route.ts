@@ -1,71 +1,125 @@
 import { NextRequest } from 'next/server'
-import { successResponse, unauthorizedResponse } from '@/lib/utils'
+import { supabase, supabaseAdmin, getAuthUser, createUserClient } from '@/lib/supabase'
+import { successResponse, errorResponse, unauthorizedResponse } from '@/lib/utils'
 
-// Mocking the complex data model requested
-const MOCK_GRAPH = {
-  nodes: [
-    { id: 'n1', label: 'Basic Algebra', status: 'mastered', mastery_score: 95, estimated_time_minutes: 30, why_it_matters: 'The foundation of all equations.' },
-    { id: 'n2', label: 'Trigonometry', status: 'mastered', mastery_score: 85, estimated_time_minutes: 45, why_it_matters: 'Required for calculating angles and wave functions.' },
-    { id: 'n3', label: 'Vectors', status: 'in-progress', mastery_score: 60, estimated_time_minutes: 60, why_it_matters: 'Essential for understanding forces, velocity, and multi-dimensional movement.' },
-    { id: 'n4', label: 'Kinematics', status: 'gap', mastery_score: 20, estimated_time_minutes: 90, why_it_matters: 'The study of motion without considering its causes. Essential for basic physics.' },
-    { id: 'n5', label: 'Newton\'s Laws', status: 'locked', mastery_score: 0, estimated_time_minutes: 120, why_it_matters: 'The fundamental laws of classical mechanics that govern how things move.' },
-    { id: 'n6', label: 'Work & Energy', status: 'locked', mastery_score: 0, estimated_time_minutes: 90, why_it_matters: 'Allows solving complex motion problems using conservation principles.' },
-    { id: 'n7', label: 'Calculus (Derivatives)', status: 'gap', mastery_score: 10, estimated_time_minutes: 150, why_it_matters: 'The mathematics of continuous change, needed for advanced physics.' },
-    { id: 'n8', label: 'Calculus (Integrals)', status: 'locked', mastery_score: 0, estimated_time_minutes: 150, why_it_matters: 'Calculates area under curves and total accumulated quantities.' },
-    { id: 'n9', label: 'Electromagnetism', status: 'locked', mastery_score: 0, estimated_time_minutes: 200, why_it_matters: 'Unifies electricity and magnetism, governing modern technology.' },
-    { id: 'n10', label: 'Quantum Mechanics', status: 'locked', mastery_score: 0, estimated_time_minutes: 300, why_it_matters: 'The physics of the atomic and subatomic realm.' },
-  ],
-  links: [
-    { source: 'n1', target: 'n2', type: 'direct' },
-    { source: 'n2', target: 'n3', type: 'direct' },
-    { source: 'n1', target: 'n7', type: 'direct' },
-    { source: 'n3', target: 'n4', type: 'direct' },
-    { source: 'n7', target: 'n4', type: 'recommended' }, // helpful but not strictly blocking
-    { source: 'n4', target: 'n5', type: 'direct' },
-    { source: 'n5', target: 'n6', type: 'direct' },
-    { source: 'n7', target: 'n8', type: 'direct' },
-    { source: 'n8', target: 'n9', type: 'direct' },
-    { source: 'n5', target: 'n9', type: 'direct' },
-    { source: 'n9', target: 'n10', type: 'direct' },
-    { source: 'n8', target: 'n10', type: 'direct' },
-  ]
-}
+export const dynamic = 'force-dynamic' // Ensure realtime, no caching
 
 export async function GET(request: NextRequest) {
   try {
-    // In a real app, we would fetch from DB and build this dynamically
-    // For this prototype, we return the highly curated structure to meet the advanced UX spec
-    
-    // Process unlocks & prerequisites
-    const nodesMap = new Map(MOCK_GRAPH.nodes.map(n => [n.id, { ...n, unlocks: [] as string[], prerequisites: [] as string[] }]))
-    
-    MOCK_GRAPH.links.forEach(l => {
-      const src = nodesMap.get(l.source)
-      const tgt = nodesMap.get(l.target)
-      if (src && tgt && l.type === 'direct') {
-        src.unlocks.push(l.target)
-        tgt.prerequisites.push(l.source)
-      }
-    })
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader) return unauthorizedResponse()
+    const token = authHeader.replace('Bearer ', '')
 
-    const finalNodes = Array.from(nodesMap.values())
-    
-    // Dynamic status calculation based on prereqs
-    finalNodes.forEach(n => {
-      if (n.mastery_score >= 80) n.status = 'mastered'
-      else if (n.mastery_score >= 30) n.status = 'in-progress'
-      else {
-        // It's < 30. Is it a gap or locked?
-        const unmasteredPrereqs = n.prerequisites.filter(pId => {
-          const pNode = nodesMap.get(pId)
-          return pNode && pNode.mastery_score < 80
-        })
-        n.status = unmasteredPrereqs.length > 0 ? 'locked' : 'gap'
-      }
-    })
+    const user = await getAuthUser(request)
+    if (!user) return unauthorizedResponse()
 
-    return successResponse({ nodes: finalNodes, links: MOCK_GRAPH.links })
+    const userClient = createUserClient(token)
+
+    // 1. Target subject (Physics)
+    const { data: subjectData } = await supabaseAdmin.from('subjects').select('id, name').eq('name', 'Physics').single()
+    const subjectId = subjectData?.id
+
+    console.log(`[MAP API] Subject search for Physics: ${subjectId ? 'FOUND' : 'NOT FOUND'}`)
+
+    if (!subjectId) {
+      // Fallback: try to get the first subject if Physics not found
+      const { data: firstSubject } = await supabaseAdmin.from('subjects').select('id, name').limit(1).single()
+      if (!firstSubject) return errorResponse('No subjects found in database', 404)
+      console.log(`[MAP API] Falling back to first subject: ${firstSubject.name}`)
+      return successResponse({ nodes: [], links: [], message: 'Please seed your database with Physics topics.' })
+    }
+
+    // 2. Fetch real topics for the subject
+    const { data: topics } = await supabaseAdmin
+      .from('topics')
+      .select('id, name, difficulty, weightage, chapter_num')
+      .eq('subject_id', subjectId)
+      .order('chapter_num', { ascending: true })
+
+    console.log(`[MAP API] Topics found: ${topics?.length || 0}`)
+
+    // 3. Fetch user topic progress
+    const { data: progress } = await userClient
+      .from('user_topic_progress')
+      .select('topic_id, is_completed, mastery_level')
+      .eq('user_id', user.id)
+
+    // 4. Fetch user tests to influence gap knowledge based on tests
+    const { data: testAttempts } = await userClient
+      .from('test_attempts')
+      .select('score, max_score, accuracy, tests(subject_id)')
+      .eq('user_id', user.id)
+      .eq('status', 'COMPLETED')
+
+    // Calculate average test accuracy for this subject
+    let avgAccuracy = 0
+    let attemptCount = 0
+    if (testAttempts) {
+       for (const a of testAttempts) {
+          const tSubjId = Array.isArray(a.tests) ? (a.tests[0] as any)?.subject_id : (a.tests as any)?.subject_id
+          // Only include tests for this subject, or generic tests if subject is null
+          if (tSubjId === subjectId || !tSubjId) {
+             avgAccuracy += (a.accuracy || 0)
+             attemptCount++
+          }
+       }
+    }
+    avgAccuracy = attemptCount > 0 ? avgAccuracy / attemptCount : 0
+
+    const progressMap = new Map()
+    progress?.forEach(p => progressMap.set(p.topic_id, p))
+
+    const nodes = []
+    const links = []
+
+    // 5. Build dynamic nodes and sequential links
+    const topicList = topics || []
+    for (let i = 0; i < topicList.length; i++) {
+       const t = topicList[i]
+       const p = progressMap.get(t.id)
+       
+       // Gap knowledge uses data of tests! We blend progress with test accuracy.
+       let mastery_score = p?.mastery_level || 0
+       
+       if (attemptCount > 0) {
+           if (p?.is_completed) {
+              mastery_score = Math.round(60 + (avgAccuracy * 0.4)) // Scale up if completed
+           } else {
+              // Gaps determined heavily by test accuracy, ensure minimum 15% so it's a 'gap' not 'locked'
+              mastery_score = Math.max(15, Math.round(avgAccuracy * 0.5)) 
+           }
+       } else {
+           if (p?.is_completed) mastery_score = 100
+       }
+       
+       // Determine status
+       let status = 'locked'
+       if (mastery_score >= 80) status = 'mastered'
+       else if (mastery_score >= 40) status = 'in-progress'
+       else if (i === 0 || progressMap.get(topicList[i-1].id)?.is_completed || mastery_score > 0) {
+           status = 'gap' // It's accessible, but score is low -> Knowledge Gap!
+       }
+
+       nodes.push({
+         id: t.id,
+         label: t.name,
+         status,
+         mastery_score,
+         estimated_time_minutes: (t.weightage || 5) * 10,
+         why_it_matters: `Chapter ${t.chapter_num}: ${t.name} holds ${t.weightage}% weightage. Your test accuracy heavily points to focusing here.`,
+         prerequisites: i > 0 ? [topicList[i-1].id] : [],
+         unlocks: i < topicList.length - 1 ? [topicList[i+1].id] : []
+       })
+       
+       // Linear Dependency Path
+       if (i > 0) {
+         links.push({ source: topicList[i-1].id, target: t.id, type: 'direct' })
+       }
+    }
+    
+    return successResponse({ nodes, links })
   } catch (err: any) {
-    return successResponse(MOCK_GRAPH) // Fallback
+    console.error('Map API Error:', err)
+    return errorResponse('Failed to generate map', 500)
   }
 }

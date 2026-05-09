@@ -1,13 +1,19 @@
 import { NextRequest } from 'next/server'
-import { supabase, getAuthUser } from '@/lib/supabase'
+import { supabase, getAuthUser, createUserClient } from '@/lib/supabase'
 import { successResponse, errorResponse, unauthorizedResponse, calculateXP } from '@/lib/utils'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
 export async function POST(request: NextRequest, { params }: RouteContext) {
   try {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader) return unauthorizedResponse()
+    const token = authHeader.replace('Bearer ', '')
+
     const user = await getAuthUser(request)
     if (!user) return unauthorizedResponse()
+
+    const userClient = createUserClient(token)
 
     const { id: testId } = await params
     const body = await request.json()
@@ -15,14 +21,14 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
 
     if (action === 'start') {
       // Cancel any stale IN_PROGRESS attempts first, then create a fresh one
-      await supabase
+      await userClient
         .from('test_attempts')
         .update({ status: 'COMPLETED', completed_at: new Date().toISOString() })
         .eq('user_id', user.id)
         .eq('test_id', testId)
         .eq('status', 'IN_PROGRESS')
 
-      const { data: attempt, error } = await supabase
+      const { data: attempt, error } = await userClient
         .from('test_attempts')
         .insert({ test_id: testId, user_id: user.id, status: 'IN_PROGRESS' })
         .select()
@@ -37,7 +43,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       const [testRes, questionsRes, profileRes] = await Promise.all([
         supabase.from('tests').select('max_marks, total_questions, subject_id').eq('id', testId).single(),
         supabase.from('questions').select('id, correct_option, marks, negative_marks, topic_id').eq('test_id', testId),
-        supabase.from('profiles').select('xp').eq('id', user.id).single()
+        userClient.from('profiles').select('xp').eq('id', user.id).single()
       ])
 
       const test = testRes.data
@@ -50,7 +56,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       // Resolve attempt ID — use provided one, or find IN_PROGRESS, or auto-start one
       let resolvedAttemptId = attempt_id
       if (!resolvedAttemptId) {
-        const { data: existing, error: existingErr } = await supabase
+        const { data: existing, error: existingErr } = await userClient
           .from('test_attempts')
           .select('id')
           .eq('user_id', user.id)
@@ -64,7 +70,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
           resolvedAttemptId = existing.id
         } else {
           // Auto-create attempt if none exists (handles edge cases)
-          const { data: newAttempt, error: createErr } = await supabase
+          const { data: newAttempt, error: createErr } = await userClient
             .from('test_attempts')
             .insert({ test_id: testId, user_id: user.id, status: 'IN_PROGRESS' })
             .select('id')
@@ -72,6 +78,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
             
           if (createErr) console.error('Failed to auto-create attempt:', createErr)
           resolvedAttemptId = newAttempt?.id
+          
+          if (!resolvedAttemptId) {
+            return errorResponse(`Could not resolve attempt. DB Error: ${createErr?.message || JSON.stringify(createErr)}`)
+          }
         }
       }
 
@@ -85,11 +95,23 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       const answerRecords = []
       const weakTopicIds = new Set<string>()
 
+      try {
+        require('fs').writeFileSync('test-submit.log', JSON.stringify({ answers, questions }, null, 2))
+      } catch (e) {}
+
       for (const question of questions) {
         const userAnswer = answers?.[question.id]
         const isSkipped = userAnswer === undefined || userAnswer === null || userAnswer === -1
         const isCorrect = !isSkipped && Number(userAnswer) === question.correct_option
         let marksObtained = 0
+        
+        console.log('Evaluating Question:', {
+          questionId: question.id,
+          userAnswer,
+          correctOption: question.correct_option,
+          isCorrect,
+          isSkipped
+        })
 
         if (isSkipped) {
           skippedCount++
@@ -118,13 +140,14 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       const accuracy = correctCount + wrongCount > 0
         ? Math.round((correctCount / (correctCount + wrongCount)) * 100)
         : 0
-      const percentile = Math.max(1, Math.min(99, Math.round(50 + (score / test.max_marks) * 45)))
+      const safeMaxMarks = test.max_marks || 1
+      const percentile = Math.max(1, Math.min(99, Math.round(50 + (score / safeMaxMarks) * 45)))
       const xpGained = calculateXP('test_complete', accuracy)
 
       // Fire all DB writes in parallel
       const writeOps: any[] = [
-        supabase.from('attempt_answers').insert(answerRecords),
-        supabase.from('test_attempts').update({
+        userClient.from('attempt_answers').insert(answerRecords),
+        userClient.from('test_attempts').update({
           score,
           accuracy,
           time_taken: time_taken || 0,
@@ -135,7 +158,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
           status: 'COMPLETED',
           completed_at: new Date().toISOString()
         }).eq('id', resolvedAttemptId),
-        supabase.from('profiles').update({ xp: (profileRes.data?.xp || 0) + xpGained }).eq('id', user.id)
+        userClient.from('profiles').update({ xp: (profileRes.data?.xp || 0) + xpGained }).eq('id', user.id)
       ]
 
       // Auto-generate revision cards for wrong-answer topics
@@ -149,10 +172,15 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
           source: 'test_mistake',
           next_review_at: new Date().toISOString()
         }))
-        writeOps.push(supabase.from('revision_cards').insert(weakCards))
+        writeOps.push(userClient.from('revision_cards').insert(weakCards))
       }
 
-      await Promise.all(writeOps)
+      const results = await Promise.all(writeOps)
+      const errors = results.filter(r => r.error)
+      if (errors.length > 0) {
+        console.error('DB Write Errors during submit:', errors.map(e => e.error))
+        return errorResponse('Failed to save test results completely, but attempt was recorded.', 500)
+      }
 
       return successResponse({
         attempt_id: resolvedAttemptId,
@@ -169,8 +197,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     }
 
     return errorResponse('Invalid action. Use "start" or "submit".')
-  } catch (err) {
+  } catch (err: any) {
     console.error('Attempt error:', err)
-    return errorResponse('Internal server error', 500)
+    return errorResponse(`Internal server error: ${err?.message || err}`, 500)
   }
 }

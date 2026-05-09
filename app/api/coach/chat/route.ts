@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { supabase, getAuthUser } from '@/lib/supabase'
+import { supabase, getAuthUser, createUserClient } from '@/lib/supabase'
 import { generateAIResponse } from '@/lib/gemini'
 import { successResponse, errorResponse, unauthorizedResponse } from '@/lib/utils'
 
@@ -10,8 +10,14 @@ export const revalidate = 0
 // POST /api/coach/chat — send message to AI coach
 export async function POST(request: NextRequest) {
   try {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader) return unauthorizedResponse()
+    const token = authHeader.replace('Bearer ', '')
+
     const user = await getAuthUser(request)
     if (!user) return unauthorizedResponse()
+
+    const userClient = createUserClient(token)
 
     const { message, context } = await request.json()
 
@@ -22,7 +28,7 @@ export async function POST(request: NextRequest) {
     const trimmedMessage = message.trim()
 
     // Get user profile
-    const { data: profile } = await supabase
+    const { data: profile } = await userClient
       .from('profiles')
       .select('name, target_exam, target_year')
       .eq('id', user.id)
@@ -30,7 +36,7 @@ export async function POST(request: NextRequest) {
 
     // Get recent chat history BEFORE saving the new user message
     // This ensures the history passed to AI doesn't include the current message
-    const { data: history } = await supabase
+    const { data: history } = await userClient
       .from('coach_messages')
       .select('role, content')
       .eq('user_id', user.id)
@@ -40,7 +46,7 @@ export async function POST(request: NextRequest) {
     const chatHistory = (history || []).reverse()
 
     // Get weak topics for context
-    const { data: weakTopics } = await supabase
+    const { data: weakTopics } = await userClient
       .from('user_topic_progress')
       .select('topics(name)')
       .eq('user_id', user.id)
@@ -48,7 +54,7 @@ export async function POST(request: NextRequest) {
       .limit(5)
 
     // Get recent test score
-    const { data: lastAttempt } = await supabase
+    const { data: lastAttempt } = await userClient
       .from('test_attempts')
       .select('accuracy')
       .eq('user_id', user.id)
@@ -67,7 +73,7 @@ export async function POST(request: NextRequest) {
     })
 
     // Now save both messages (user first, then assistant)
-    await supabase.from('coach_messages').insert([
+    await userClient.from('coach_messages').insert([
       {
         user_id: user.id,
         role: 'user',

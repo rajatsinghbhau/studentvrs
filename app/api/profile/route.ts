@@ -1,14 +1,20 @@
 import { NextRequest } from 'next/server'
-import { supabase, getAuthUser } from '@/lib/supabase'
+import { supabase, getAuthUser, createUserClient } from '@/lib/supabase'
 import { successResponse, errorResponse, unauthorizedResponse, calculateLevel } from '@/lib/utils'
 
 // GET /api/profile
 export async function GET(request: NextRequest) {
   try {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader) return unauthorizedResponse()
+    const token = authHeader.replace('Bearer ', '')
+
     const user = await getAuthUser(request)
     if (!user) return unauthorizedResponse()
 
-    const { data: profile, error } = await supabase
+    const userClient = createUserClient(token)
+
+    const { data: profile, error } = await userClient
       .from('profiles')
       .select('*')
       .eq('id', user.id)
@@ -17,7 +23,7 @@ export async function GET(request: NextRequest) {
     if (error || !profile) return errorResponse('Profile not found', 404)
 
     // Total tests and avg score
-    const { data: attempts } = await supabase
+    const { data: attempts } = await userClient
       .from('test_attempts')
       .select('score, max_score, accuracy')
       .eq('user_id', user.id)
@@ -28,7 +34,7 @@ export async function GET(request: NextRequest) {
       : 0
 
     // Total study time
-    const { data: sessions } = await supabase
+    const { data: sessions } = await userClient
       .from('study_sessions')
       .select('duration')
       .eq('user_id', user.id)
@@ -75,8 +81,14 @@ export async function GET(request: NextRequest) {
 // PATCH /api/profile
 export async function PATCH(request: NextRequest) {
   try {
+    const authHeader = request.headers.get('Authorization')
+    if (!authHeader) return unauthorizedResponse()
+    const token = authHeader.replace('Bearer ', '')
+
     const user = await getAuthUser(request)
     if (!user) return unauthorizedResponse()
+
+    const userClient = createUserClient(token)
 
     const body = await request.json()
     const allowedFields = ['name', 'avatar_url', 'bio', 'target_exam', 'target_year', 'onboarding_done']
@@ -90,7 +102,7 @@ export async function PATCH(request: NextRequest) {
       return errorResponse('No valid fields to update')
     }
 
-    const { data: profile, error } = await supabase
+    const { data: profile, error } = await userClient
       .from('profiles')
       .update(updateData)
       .eq('id', user.id)
