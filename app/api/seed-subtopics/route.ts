@@ -65,12 +65,53 @@ export async function POST(_request: NextRequest) {
       // Fall through — tables might already exist
     }
 
-    // ── Step 2: Fetch all topics ───────────────────────────────
+    // ── Step 2: Ensure all Chemistry topics (including Physical Chemistry) exist ──
     const { createClient } = await import('@supabase/supabase-js')
     const admin = createClient(SUPABASE_URL, SERVICE_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     })
 
+    // Fetch subjects to get Chemistry ID
+    const { data: subjects, error: subjErr } = await admin
+      .from('subjects')
+      .select('id, name')
+
+    if (subjErr) {
+      return errorResponse(`Failed to fetch subjects: ${subjErr.message}`)
+    }
+
+    const chemSubject = subjects?.find(s => s.name === 'Chemistry')
+    if (chemSubject) {
+      const targetChemTopics = ['Solutions', 'Chemical Kinetics', 'Redox Reactions']
+      for (const name of targetChemTopics) {
+        const { data: existingTopic } = await admin
+          .from('topics')
+          .select('id')
+          .eq('name', name)
+          .eq('subject_id', chemSubject.id)
+          .maybeSingle()
+
+        if (!existingTopic) {
+          let chNum = 12
+          if (name === 'Chemical Kinetics') chNum = 13
+          if (name === 'Redox Reactions') chNum = 14
+
+          const { error: insertErr } = await admin
+            .from('topics')
+            .insert({
+              name,
+              subject_id: chemSubject.id,
+              chapter_num: chNum,
+              description: `Physical Chemistry: ${name}`
+            })
+          if (insertErr) {
+            console.error(`Failed to auto-insert missing Chemistry topic "${name}":`, insertErr.message)
+          }
+        }
+      }
+    }
+
+    // ── Step 3: Fetch all topics ───────────────────────────────
     const { data: topics, error: topicsErr } = await admin
       .from('topics')
       .select('id, name')
@@ -212,6 +253,22 @@ export async function POST(_request: NextRequest) {
       ['Lanthanides & Actinides', 'HARD', 4], ['KMnO4 & K2Cr2O7 Compounds', 'MEDIUM', 5],
     ])
 
+    // Physical Chemistry
+    push('Solutions', [
+      ['Types of Solutions & Concentration', 'EASY', 1], ['Solubility & Henry\'s Law', 'EASY', 2],
+      ['Vapour Pressure & Raoult\'s Law', 'MEDIUM', 3], ['Ideal & Non-ideal Solutions', 'MEDIUM', 4],
+      ['Colligative Properties', 'HARD', 5], ['van \'t Hoff Factor', 'HARD', 6],
+    ])
+    push('Chemical Kinetics', [
+      ['Rate of a Chemical Reaction', 'EASY', 1], ['Factors Affecting Rate', 'MEDIUM', 2],
+      ['Order & Molecularity', 'MEDIUM', 3], ['Integrated Rate Equations', 'HARD', 4],
+      ['Half-life of a Reaction', 'MEDIUM', 5], ['Collision Theory & Arrhenius Equation', 'HARD', 6],
+    ])
+    push('Redox Reactions', [
+      ['Concept of Oxidation & Reduction', 'EASY', 1], ['Oxidation Number Calculation', 'EASY', 2],
+      ['Balancing Redox Reactions', 'MEDIUM', 3], ['Types of Redox Reactions', 'MEDIUM', 4],
+    ])
+
     // Mathematics
     push('Sets, Relations & Functions', [
       ['Set Theory & Operations', 'EASY', 1], ['Types of Relations', 'MEDIUM', 2],
@@ -286,35 +343,21 @@ export async function POST(_request: NextRequest) {
       return errorResponse('No matching topics found in DB', 404)
     }
 
-    // ── Step 3: Check what's already seeded ────────────────────
-    const { data: existing, error: existErr } = await admin
+    // ── Step 4: Clean sweep to prevent UNIQUE constraint collisions ──
+    const { error: deleteErr } = await admin
       .from('subtopics' as never)
-      .select('topic_id, name')
+      .delete()
+      .neq('name', '___NON_EXISTENT_NAME___') // safe delete all rows
 
-    if (existErr) {
-      if ((existErr as { code?: string }).code === '42P01') {
-        return errorResponse('subtopics table missing — run supabase/subtopics_migration.sql first', 503)
-      }
-      return errorResponse(`Check existing error: ${existErr.message}`)
+    if (deleteErr) {
+      return errorResponse(`Clean sweep error: ${deleteErr.message}`)
     }
 
-    const existingSet = new Set(
-      ((existing as { topic_id: string; name: string }[]) || []).map(
-        e => `${e.topic_id}::${e.name}`
-      )
-    )
-
-    const newRows = rows.filter(r => !existingSet.has(`${r.topic_id}::${r.name}`))
-
-    if (newRows.length === 0) {
-      return successResponse({ message: `Already seeded ${rows.length} subtopics — nothing new to add!`, inserted: 0 })
-    }
-
-    // ── Step 4: Insert only new rows in batches ─────────────────
+    // ── Step 5: Insert all rows in batches ───────────────────────
     const BATCH = 50
     let inserted = 0
-    for (let i = 0; i < newRows.length; i += BATCH) {
-      const batch = newRows.slice(i, i + BATCH)
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const batch = rows.slice(i, i + BATCH)
       const { error } = await admin
         .from('subtopics' as never)
         .insert(batch as never)
@@ -325,7 +368,7 @@ export async function POST(_request: NextRequest) {
       inserted += batch.length
     }
 
-    return successResponse({ message: `Seeded ${inserted} subtopics!`, inserted })
+    return successResponse({ message: `Seeded ${inserted} subtopics successfully!`, inserted })
   } catch (err) {
     console.error('Seed error:', err)
     return errorResponse(`Seed failed: ${err instanceof Error ? err.message : String(err)}`)
