@@ -90,28 +90,26 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         return errorResponse('Could not resolve attempt. Please try again.')
       }
 
-      // Score calculation
+      // Score calculation — use parseInt on both sides to avoid any type mismatch
       let score = 0, correctCount = 0, wrongCount = 0, skippedCount = 0
       const answerRecords = []
       const weakTopicIds = new Set<string>()
 
-      try {
-        require('fs').writeFileSync('test-submit.log', JSON.stringify({ answers, questions }, null, 2))
-      } catch (e) {}
+      console.log('[SCORING] answers received:', JSON.stringify(answers))
+      console.log('[SCORING] questions from DB:', questions.map(q => ({ id: q.id, correct_option: q.correct_option, type: typeof q.correct_option })))
 
       for (const question of questions) {
         const userAnswer = answers?.[question.id]
         const isSkipped = userAnswer === undefined || userAnswer === null || userAnswer === -1
-        const isCorrect = !isSkipped && Number(userAnswer) === question.correct_option
+
+        // Force both sides to integer to prevent any type-coercion bugs
+        const userIdx = isSkipped ? -1 : parseInt(String(userAnswer), 10)
+        const correctIdx = parseInt(String(question.correct_option), 10)
+        const isCorrect = !isSkipped && !isNaN(userIdx) && !isNaN(correctIdx) && userIdx === correctIdx
+
         let marksObtained = 0
-        
-        console.log('Evaluating Question:', {
-          questionId: question.id,
-          userAnswer,
-          correctOption: question.correct_option,
-          isCorrect,
-          isSkipped
-        })
+
+        console.log('[SCORING] Q:', question.id.slice(0,8), '| user:', userAnswer, `(${typeof userAnswer}→${userIdx})`, '| correct:', question.correct_option, `(${typeof question.correct_option}→${correctIdx})`, '| match:', isCorrect, '| skip:', isSkipped)
 
         if (isSkipped) {
           skippedCount++
@@ -129,7 +127,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         answerRecords.push({
           attempt_id: resolvedAttemptId,
           question_id: question.id,
-          selected_option: isSkipped ? null : Number(userAnswer),
+          selected_option: isSkipped ? null : userIdx,
           is_correct: isCorrect,
           is_skipped: isSkipped,
           time_taken: 0,
@@ -149,6 +147,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         userClient.from('attempt_answers').insert(answerRecords),
         userClient.from('test_attempts').update({
           score,
+          max_score: test.max_marks,
           accuracy,
           time_taken: time_taken || 0,
           correct_count: correctCount,
@@ -176,10 +175,12 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       }
 
       const results = await Promise.all(writeOps)
-      const errors = results.filter(r => r.error)
-      if (errors.length > 0) {
-        console.error('DB Write Errors during submit:', errors.map(e => e.error))
-        return errorResponse('Failed to save test results completely, but attempt was recorded.', 500)
+      // Log non-critical write errors but don't block the response
+      results.forEach((r, i) => { if (r.error) console.error(`DB write op ${i} error:`, r.error) })
+      // Only the attempt_answers (0) and test_attempts update (1) are critical
+      if (results[0]?.error || results[1]?.error) {
+        console.error('Critical DB write failed:', results[0]?.error || results[1]?.error)
+        return errorResponse('Failed to save test results. Please try again.', 500)
       }
 
       return successResponse({

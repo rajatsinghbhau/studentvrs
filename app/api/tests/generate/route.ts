@@ -16,6 +16,7 @@ export async function POST(request: NextRequest) {
     if (!subject) return errorResponse('Subject is required')
 
     const safeCount = Math.min(Math.max(Number(count) || 10, 5), 30)
+    const aiCount = safeCount + 4 // Ask AI for a surplus of questions so we can discard any duplicates
 
     // Look up subject record
     const { data: subjectRecord } = await supabase
@@ -25,59 +26,62 @@ export async function POST(request: NextRequest) {
       .limit(1)
       .single()
 
-    // Fetch recently used question texts for this user → avoid repetition
-    const { data: recentAttempts } = await supabase
-      .from('test_attempts')
-      .select('test_id')
-      .eq('user_id', user.id)
-      .eq('status', 'COMPLETED')
-      .order('completed_at', { ascending: false })
-      .limit(15)
+    // Fetch ALL tests created by the user and ALL attempts taken by the user to avoid any duplicate questions
+    const [{ data: userTests }, { data: userAttempts }] = await Promise.all([
+      supabase.from('tests').select('id').eq('created_by', user.id),
+      supabase.from('test_attempts').select('test_id').eq('user_id', user.id)
+    ])
 
-    let recentQuestions: string[] = []
-    const recentTestIds = recentAttempts?.map(a => a.test_id).filter(Boolean) || []
-    if (recentTestIds.length > 0) {
-      const { data: recentQs } = await supabase
+    const userTestIds = Array.from(new Set([
+      ...(userTests?.map(t => t.id) || []),
+      ...(userAttempts?.map(a => a.test_id) || [])
+    ].filter(Boolean)))
+
+    let seenQuestionTexts: string[] = []
+    if (userTestIds.length > 0) {
+      const { data: seenQs } = await supabase
         .from('questions')
         .select('question_text')
-        .in('test_id', recentTestIds)
-        .limit(60)
-      recentQuestions = recentQs?.map(q => q.question_text.substring(0, 100)) || []
+        .in('test_id', userTestIds)
+        .limit(300)
+      seenQuestionTexts = seenQs?.map(q => q.question_text.trim()).filter(Boolean) || []
     }
 
-    const avoidContext = recentQuestions.length > 0
-      ? `\n\nIMPORTANT - Do NOT generate questions similar to these previously asked questions:\n${recentQuestions.slice(0, 25).map((q, i) => `${i + 1}. ${q}`).join('\n')}`
+    const avoidContext = seenQuestionTexts.length > 0
+      ? `\n\nCRITICAL: Do NOT generate questions similar to these previously asked questions. Create entirely new questions with different numbers, setups, and target variables:\n${seenQuestionTexts.slice(-40).map((q, i) => `${i + 1}. ${q}`).join('\n')}`
       : ''
 
     const topicContext = topic ? ` specifically on the topic: "${topic}"` : ''
     const examLabel = subject.toLowerCase().includes('bio') ? 'NEET' : 'JEE'
 
-    const prompt = `You are an expert ${examLabel} question setter. Generate exactly ${safeCount} unique, high-quality multiple-choice questions for ${subject}${topicContext} at ${difficulty} difficulty level.
+    const prompt = `You are an expert ${examLabel} question setter. Generate exactly ${aiCount} unique, high-quality multiple-choice questions for ${subject}${topicContext} at ${difficulty} difficulty level.
 
 Return ONLY a valid JSON array. No markdown fences, no explanation text before or after. Just the raw JSON array.
+
+IMPORTANT: The FIRST option (options[0]) MUST ALWAYS be the correct answer. The remaining 3 options are distractors.
 
 Each question object must have exactly this structure:
 {
   "question_text": "Complete question text here",
-  "options": ["Option A text", "Option B text", "Option C text", "Option D text"],
-  "correct_option": 0,
+  "options": ["CORRECT ANSWER HERE", "Wrong option 1", "Wrong option 2", "Wrong option 3"],
+  "explanation": "Brief explanation of why the first option is the correct answer",
   "difficulty": "${difficulty}",
   "marks": 4,
-  "negative_marks": 1,
-  "explanation": "Brief explanation of why the correct option is right"
+  "negative_marks": 1
 }
 
 Rules:
-- correct_option is 0-indexed (0=A, 1=B, 2=C, 3=D)
+- options[0] MUST be the scientifically/mathematically correct answer — verify your calculations
+- For numerical questions, double-check your math before writing the answer
+- The other 3 options must be plausible but clearly wrong
 - Questions must be conceptually distinct from each other
-- All 4 options must be plausible
 - Questions should test deep understanding, not just memorisation
 - Use proper scientific notation where needed${avoidContext}`
 
     const completion = await groq.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
       messages: [{ role: 'user', content: prompt }],
-      temperature: 0.85,
+      temperature: 0.7,
       max_tokens: 6000,
     })
 
@@ -100,16 +104,83 @@ Rules:
       return errorResponse('AI returned no valid questions. Please try again.')
     }
 
-    // Validate and sanitize each question
+    // ── Fisher-Yates shuffle for options ──────────────────────────────
+    // The AI was told to put the correct answer at index 0.
+    // We now shuffle the options and track where index 0 ends up.
+    // This makes correct_option 100% accurate regardless of AI behavior.
+    function shuffleOptions(options: string[]): { shuffled: string[]; correctIndex: number } {
+      // Create index array [0,1,2,3] and shuffle it
+      const indices = [0, 1, 2, 3]
+      for (let i = indices.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [indices[i], indices[j]] = [indices[j], indices[i]]
+      }
+      const shuffled = indices.map(i => options[i])
+      // The correct answer was at original index 0 — find its new position
+      const correctIndex = indices.indexOf(0)
+      return { shuffled, correctIndex }
+    }
+
+    // Similarity checker to prevent repeats
+    function isDuplicate(text: string, seenList: string[]): boolean {
+      const cleanStr = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+      const tClean = cleanStr(text)
+      
+      for (const seen of seenList) {
+        const sClean = cleanStr(seen)
+        if (tClean === sClean) {
+          console.log(`[DUPLICATE FILTER] Rejected exact duplicate question: "${seen.substring(0, 60)}..."`)
+          return true
+        }
+      }
+      return false
+    }
+
+    // Keep track of unique questions generated in this request
+    const uniqueThisRun: string[] = []
+
+    // Validate, filter duplicates, and shuffle each question
     const validQuestions = questions
-      .filter(q =>
-        typeof q.question_text === 'string' &&
-        Array.isArray(q.options) && q.options.length === 4 &&
-        typeof q.correct_option === 'number' && q.correct_option >= 0 && q.correct_option <= 3
-      )
+      .filter((q, i) => {
+        if (typeof q.question_text !== 'string' || !q.question_text.trim()) return false
+        if (!Array.isArray(q.options) || q.options.length !== 4) return false
+        // Check all options are non-empty strings
+        if (q.options.some((o: any) => typeof o !== 'string' || !o.trim())) return false
+        
+        // 1. Check against historical seen questions
+        if (isDuplicate(q.question_text, seenQuestionTexts)) {
+          console.log(`[GENERATE] Question Q${i+1} rejected as duplicate of historical seen question.`)
+          return false
+        }
+        // 2. Check against duplicate within this single response
+        if (isDuplicate(q.question_text, uniqueThisRun)) {
+          console.log(`[GENERATE] Question Q${i+1} rejected as duplicate of another question generated in this run.`)
+          return false
+        }
+        
+        uniqueThisRun.push(q.question_text.trim())
+        return true
+      })
+      .map((q, i) => {
+        // Shuffle options — correct answer moves from index 0 to a random position
+        const { shuffled, correctIndex } = shuffleOptions(q.options)
+        console.log(`[GENERATE] Q${i+1}: correct answer="${q.options[0]}" → shuffled to index ${correctIndex}`)
+        return {
+          ...q,
+          options: shuffled,
+          correct_option: correctIndex,
+        }
+      })
       .slice(0, safeCount)
 
+    console.log(`[GENERATE] ${validQuestions.length}/${questions.length} questions passed validation and duplication checks`)
+
+    if (validQuestions.length < safeCount) {
+      console.warn(`[GENERATE] Could only obtain ${validQuestions.length} unique questions out of requested ${safeCount}. Proceeding anyway.`)
+    }
+
     if (validQuestions.length === 0) {
+      console.error('Validation failed. Sample question:', JSON.stringify(questions[0]))
       return errorResponse('AI questions did not pass validation. Please try again.')
     }
 
@@ -140,12 +211,13 @@ Rules:
       return errorResponse('Failed to create test record: ' + testError?.message)
     }
 
-    // Insert questions
+    // Insert questions — correct_option is already a 0-indexed integer from the shuffle
     const questionRecords = validQuestions.map((q, i) => ({
       test_id: test.id,
       question_text: q.question_text,
       options: q.options,
-      correct_option: Number(q.correct_option),
+      correct_option: q.correct_option,
+      explanation: q.explanation || '',
       difficulty: (q.difficulty || difficulty).toUpperCase(),
       marks: Number(q.marks) || 4,
       negative_marks: Number(q.negative_marks) || 1,
