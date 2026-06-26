@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
         .select('id, name, difficulty, order_num, topic_id')
         .eq('topic_id', topicId)
         .order('order_num'),
-      supabase
+      supabaseAdmin
         .from('user_subtopic_progress')
         .select('subtopic_id, is_completed, completed_at')
         .eq('user_id', user.id)

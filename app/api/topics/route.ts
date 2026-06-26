@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { supabase, getAuthUser } from '@/lib/supabase'
+import { supabase, supabaseAdmin, getAuthUser } from '@/lib/supabase'
 import { successResponse, errorResponse, unauthorizedResponse } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
     // Get user progress for these topics
     const topicIds = topics?.map(t => t.id) || []
-    const { data: progress } = await supabase
+    const { data: progress } = await supabaseAdmin
       .from('user_topic_progress')
       .select('*')
       .eq('user_id', user.id)

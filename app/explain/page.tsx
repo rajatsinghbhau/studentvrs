@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import BottomNav from '@/components/BottomNav'
 
 interface Formula { formula: string; name: string; variables: string }
@@ -146,6 +146,17 @@ export default function ExplainPage() {
   const [error, setError] = useState('')
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('sv_token') ?? '' : ''
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const q = params.get('q')
+      if (q) {
+        setQuery(q)
+        handleSubmit(q)
+      }
+    }
+  }, [])
 
   const handleSubmit = async (q?: string) => {
     const finalQuery = (q || query).trim()

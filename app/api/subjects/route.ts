@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
         .select('id, name, icon, color, total_topics, topics(id, name, difficulty, weightage, chapter_num)')
         .or(`exam_type.eq.${examType},exam_type.eq.ALL`)
         .order('name'),
-      supabase
+      supabaseAdmin
         .from('user_topic_progress')
         .select('topic_id, is_completed, mastery_level, study_time')
         .eq('user_id', user.id)
@@ -44,7 +44,19 @@ export async function GET(request: NextRequest) {
         icon: subject.icon,
         color: subject.color,
         total_topics: subject.total_topics,
-        topics: topics.sort((a, b) => a.chapter_num - b.chapter_num),
+        topics: topics
+          .map(t => {
+            const prog = progressMap.get(t.id)
+            return {
+              ...t,
+              progress: {
+                is_completed: prog?.is_completed || false,
+                mastery_level: prog?.mastery_level || 0,
+                study_time: prog?.study_time || 0
+              }
+            }
+          })
+          .sort((a, b) => a.chapter_num - b.chapter_num),
         completed_topics: completedCount,
         progress: subject.total_topics > 0 ? Math.round((completedCount / subject.total_topics) * 100) : 0,
         total_study_time: totalStudyTime,

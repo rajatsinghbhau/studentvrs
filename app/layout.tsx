@@ -1,13 +1,14 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
+import ActivityTracker from '@/components/ActivityTracker'
 
 export const metadata: Metadata = {
-  title: 'Studentverse AI — Neo-Quantum JEE/NEET Platform',
+  title: 'Student Verse AI — Neo-Quantum JEE/NEET Platform',
   description: 'Elite AI-powered JEE & NEET preparation platform with personalized coaching, gamification, and advanced analytics.',
   keywords: 'JEE, NEET, study, AI coach, test preparation, mock tests',
-  authors: [{ name: 'Studentverse' }],
+  authors: [{ name: 'Student Verse' }],
   openGraph: {
-    title: 'Studentverse AI',
+    title: 'Student Verse AI',
     description: 'Your quantum leap to IIT',
     type: 'website'
   }
@@ -27,7 +28,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
-      <body>{children}</body>
+      <body>
+        <ActivityTracker />
+        {children}
+      </body>
     </html>
   )
 }

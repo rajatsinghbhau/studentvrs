@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import BottomNav from '@/components/BottomNav'
 import { useRouter } from 'next/navigation'
 
@@ -20,6 +20,16 @@ interface Link {
   type: 'direct' | 'recommended'
 }
 
+interface Subtopic {
+  id: string
+  name: string
+  difficulty: 'EASY' | 'MEDIUM' | 'HARD'
+  order_num: number
+  topic_id: string
+  is_completed: boolean
+  completed_at: string | null
+}
+
 const COLORS = {
   mastered: '#4ade80',    // Green
   'in-progress': '#fbbf24', // Amber
@@ -32,14 +42,45 @@ export default function KnowledgeMapPage() {
   
   const [data, setData] = useState<{ nodes: Node[]; links: Link[] }>({ nodes: [], links: [] })
   const [loading, setLoading] = useState(true)
-  const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiExplanation, setAiExplanation] = useState('')
+  // Available subjects and active selection
+  const [subjects, setSubjects] = useState<any[]>([])
+  const [activeSubject, setActiveSubject] = useState<string>('Physics')
+  
+  // Inline expansion states for subtopics and AI Explainer
+  const [expandedNodes, setExpandedNodes] = useState<{ [id: string]: boolean }>({})
+  const [subtopicsData, setSubtopicsData] = useState<{ [topicId: string]: Subtopic[] }>({})
+  const [subtopicsLoading, setSubtopicsLoading] = useState<{ [topicId: string]: boolean }>({})
+  
+  const [aiExplanations, setAiExplanations] = useState<{ [nodeId: string]: string }>({})
+  const [aiLoadingState, setAiLoadingState] = useState<{ [nodeId: string]: boolean }>({})
 
-  // Load Data
+  // Fetch available subjects on mount
   useEffect(() => {
-    fetch('/api/map', {
+    fetch('/api/subjects', {
+      headers: { 'Authorization': `Bearer ${localStorage.getItem('sv_token')}` }
+    })
+      .then(res => res.json())
+      .then(json => {
+        if (json.success && json.data.subjects) {
+          setSubjects(json.data.subjects)
+          const names = json.data.subjects.map((s: any) => s.name)
+          if (!names.includes('Physics') && names.length > 0) {
+            setActiveSubject(names[0])
+          }
+        }
+      })
+      .catch(err => console.error("Failed to load subjects", err))
+  }, [])
+
+  // Load Main Map Data depending on activeSubject selection
+  useEffect(() => {
+    setLoading(true)
+    setExpandedNodes({})
+    setSubtopicsData({})
+    setAiExplanations({})
+    
+    fetch(`/api/map?subject=${encodeURIComponent(activeSubject)}`, {
       headers: {
         'Authorization': `Bearer ${localStorage.getItem('sv_token')}`
       }
@@ -50,246 +91,588 @@ export default function KnowledgeMapPage() {
         setLoading(false)
       })
       .catch(() => setLoading(false)) // prevent hanging if error
-  }, [])
+  }, [activeSubject])
 
-  // Calculate topological layers for top-down Skill Tree rendering
-  const layers = useMemo(() => {
-    if (!data.nodes.length) return []
-    
-    const layerMap = new Map<string, number>()
-    
-    const getLayer = (id: string, visited = new Set<string>()): number => {
-      if (layerMap.has(id)) return layerMap.get(id)!
-      if (visited.has(id)) return 0 // Circular dependency fallback
-      visited.add(id)
-      
-      const node = data.nodes.find(n => n.id === id)
-      if (!node || !node.prerequisites || node.prerequisites.length === 0) {
-        layerMap.set(id, 0)
-        return 0
+  // Toggle node expansion and load subtopics dynamically
+  const toggleExpand = async (topicId: string) => {
+    const isExpanded = !!expandedNodes[topicId]
+    setExpandedNodes(prev => ({ ...prev, [topicId]: !isExpanded }))
+
+    if (!isExpanded && !subtopicsData[topicId]) {
+      setSubtopicsLoading(prev => ({ ...prev, [topicId]: true }))
+      try {
+        const res = await fetch(`/api/subtopics?topicId=${topicId}`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('sv_token')}` }
+        })
+        const json = await res.json()
+        if (json.success) {
+          setSubtopicsData(prev => ({ ...prev, [topicId]: json.data.subtopics || [] }))
+        }
+      } catch (err) {
+        console.error("Failed to load subtopics:", err)
+      } finally {
+        setSubtopicsLoading(prev => ({ ...prev, [topicId]: false }))
       }
-      
-      const maxP = Math.max(...node.prerequisites.map(p => getLayer(p, visited)))
-      const layer = maxP + 1
-      layerMap.set(id, layer)
-      return layer
     }
-    
-    data.nodes.forEach(n => getLayer(n.id))
-    
-    const maxLayer = Math.max(0, ...Array.from(layerMap.values()))
-    const newLayers: Node[][] = Array.from({ length: maxLayer + 1 }, () => [])
-    
-    data.nodes.forEach(n => {
-      const l = layerMap.get(n.id) ?? 0
-      newLayers[l].push(n)
-    })
-    
-    return newLayers
-  }, [data.nodes])
+  }
 
-  const handleAiExplain = async () => {
-    if (!selectedNode) return
-    setAiLoading(true)
+  // Trigger AI Tutor insights for a specific node
+  const handleAiExplainForNode = async (node: Node) => {
+    setAiLoadingState(prev => ({ ...prev, [node.id]: true }))
     try {
       const res = await fetch('/api/explain', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('sv_token')}` },
-        body: JSON.stringify({ query: `Explain why ${selectedNode.label} is hard to learn and suggest a custom micro-lesson.` })
+        headers: { 
+          'Content-Type': 'application/json', 
+          'Authorization': `Bearer ${localStorage.getItem('sv_token')}` 
+        },
+        body: JSON.stringify({ query: `Explain why ${node.label} is hard to learn and suggest a custom micro-lesson.` })
       })
       const json = await res.json()
-      if (json.success) setAiExplanation(json.data.explanation)
+      if (json.success) {
+        setAiExplanations(prev => ({ ...prev, [node.id]: json.data.explanation }))
+      }
     } catch {
-      setAiExplanation("AI failed to generate. Please try again.")
+      setAiExplanations(prev => ({ ...prev, [node.id]: "AI failed to generate insights. Please try again." }))
     } finally {
-      setAiLoading(false)
+      setAiLoadingState(prev => ({ ...prev, [node.id]: false }))
     }
   }
 
   return (
-    <div className="page" style={{ height: '100dvh', display: 'flex', flexDirection: 'column', background: '#050505', fontFamily: 'var(--font-body)' }}>
+    <div className="page map-page" style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column', color: '#fff', fontFamily: 'var(--font-body)', position: 'relative' }}>
+      
+      {/* Floating Space Particles */}
+      <div className="particle" style={{ width: '120px', height: '120px', top: '12%', left: '4%' }} />
+      <div className="particle" style={{ width: '160px', height: '160px', top: '55%', right: '5%', background: 'var(--secondary)' }} />
       
       {/* Header */}
-      <div style={{ padding: '24px 20px 10px', zIndex: 10, background: 'rgba(5,5,5,0.9)', backdropFilter: 'blur(10px)', borderBottom: '1px solid var(--glass-border)' }}>
-        <h2 style={{ marginBottom: '4px', fontSize: '1.4rem', color: '#fff' }}>Knowledge Roadmap 🗺️</h2>
-        <p style={{ fontSize: '0.85rem', color: 'var(--on-surface-variant)', margin: 0 }}>
-          Follow the path to master <b>Quantum Mechanics</b>.
-        </p>
+      <div style={{ padding: '24px 20px 16px', zIndex: 10, background: 'rgba(13,21,21,0.92)', backdropFilter: 'blur(20px)', borderBottom: '1px solid var(--glass-border)', position: 'sticky', top: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div className="label-caps" style={{ color: 'var(--primary)', marginBottom: '4px', fontSize: '0.72rem', letterSpacing: '0.12em', fontWeight: 700 }}>NEURAL CURRICULUM TREE</div>
+            <h2 style={{ marginBottom: '6px', fontSize: '1.4rem', color: '#fff', fontFamily: 'var(--font-heading)', fontWeight: 700 }}>{activeSubject} Roadmap 🌌</h2>
+          </div>
+          
+          {/* Quick stats panel */}
+          {!loading && data.nodes.length > 0 && (
+            <div style={{ display: 'flex', gap: '16px', textAlign: 'right' }}>
+              <div>
+                <div style={{ fontSize: '9px', color: 'var(--on-surface-variant)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Mastered</div>
+                <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--success)' }}>
+                  {data.nodes.filter(n => n.status === 'mastered').length}/{data.nodes.length}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '9px', color: 'var(--on-surface-variant)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Gaps</div>
+                <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--error)' }}>
+                  {data.nodes.filter(n => n.status === 'gap').length}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+        
+        {/* Holographic Subject Tabs */}
+        {subjects.length > 0 && (
+          <div style={{ 
+            display: 'flex', 
+            gap: '8px', 
+            marginTop: '16px', 
+            background: 'rgba(0,0,0,0.3)', 
+            padding: '4px', 
+            borderRadius: '12px', 
+            border: '1px solid rgba(255,255,255,0.05)',
+            width: 'max-content',
+            overflowX: 'auto',
+            scrollbarWidth: 'none',
+            maxWidth: '100%'
+          }}>
+            {subjects.map(subj => {
+              const isSelected = activeSubject === subj.name
+              const activeColor = subj.color || 'var(--primary)'
+              const icon = subj.icon || '⚛️'
+              
+              return (
+                <button
+                  key={subj.id}
+                  onClick={() => setActiveSubject(subj.name)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    background: isSelected ? 'rgba(255,255,255,0.08)' : 'transparent',
+                    border: isSelected ? `1px solid ${activeColor}40` : '1px solid transparent',
+                    borderRadius: '10px',
+                    padding: '6px 14px',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    color: isSelected ? '#fff' : 'var(--on-surface-variant)',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    boxShadow: isSelected ? `0 0 10px ${activeColor}15` : 'none',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  <span style={{ fontSize: '0.9rem' }}>{icon}</span>
+                  <span>{subj.name}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
         
         {/* Legend */}
         <div style={{ display: 'flex', gap: '12px', marginTop: '16px', overflowX: 'auto', scrollbarWidth: 'none', paddingBottom: '4px' }}>
           {Object.entries(COLORS).map(([status, color]) => (
-            <div key={status} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', color: '#ccc', textTransform: 'uppercase', fontWeight: 600 }}>
-              <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: color, boxShadow: `0 0 6px ${color}` }}></span>
+            <div key={status} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.72rem', color: '#ccc', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: color, boxShadow: `0 0 6px ${color}` }}></span>
               {status.replace('-', ' ')}
             </div>
           ))}
         </div>
       </div>
 
-      {/* Main Content: Skill Tree */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '30px 20px 140px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      {/* Main Content Timeline */}
+      <div style={{ flex: 1, position: 'relative', padding: '40px 20px 140px', overflowY: 'visible' }}>
         {loading ? (
-          <div style={{ color: 'var(--primary)', marginTop: '40px', fontSize: '1.2rem', animation: 'pulse 2s infinite' }}>Mapping Curriculum...</div>
-        ) : layers.length === 0 ? (
-          <div style={{ color: 'var(--on-surface-variant)', marginTop: '40px' }}>No concepts found.</div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '50vh' }}>
+            <div className="spinner" style={{ margin: '0 auto 16px', width: 44, height: 44 }} />
+            <p style={{ color: 'var(--primary)', fontSize: '0.85rem', fontFamily: 'var(--font-heading)', fontWeight: 700, letterSpacing: '0.08em' }}>MAPPING CURRICULUM GRAPH...</p>
+          </div>
+        ) : data.nodes.length === 0 ? (
+          <div style={{ color: 'var(--on-surface-variant)', textAlign: 'center', marginTop: '60px' }}>No concepts found in physics curriculum.</div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '40px', width: '100%', maxWidth: '800px' }}>
-            {layers.map((layer, layerIdx) => (
-              <div key={layerIdx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
-                
-                {/* Connector from previous layer */}
-                {layerIdx > 0 && (
-                  <div style={{ height: '40px', width: '2px', background: 'var(--glass-border)', marginBottom: '20px' }}></div>
-                )}
-                
-                {/* Layer Nodes */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: '20px', width: '100%' }}>
-                  {layer.map(node => {
-                    const isSelected = selectedNode?.id === node.id
-                    return (
-                      <div 
-                        key={node.id}
-                        onClick={() => {
-                          setSelectedNode(node)
-                          setAiExplanation('')
-                        }}
-                        style={{
-                          background: isSelected ? 'rgba(255,255,255,0.1)' : 'rgba(20,25,26,0.6)',
-                          border: `2px solid ${isSelected ? COLORS[node.status] : 'var(--glass-border)'}`,
-                          borderRadius: 'var(--radius-lg)',
-                          padding: '16px',
-                          width: '100%',
-                          maxWidth: '260px',
-                          cursor: 'pointer',
-                          transition: 'all 0.3s ease',
-                          boxShadow: isSelected ? `0 0 20px ${COLORS[node.status]}30` : 'none',
-                          position: 'relative',
-                          overflow: 'hidden'
-                        }}
-                      >
-                        {/* Status Indicator Bar */}
-                        <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: '4px', background: COLORS[node.status] }}></div>
-                        
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                          <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#fff', paddingLeft: '8px' }}>{node.label}</h3>
-                          <span style={{ fontSize: '0.8rem', fontWeight: 700, color: COLORS[node.status], background: `${COLORS[node.status]}20`, padding: '2px 8px', borderRadius: '12px' }}>
-                            {node.mastery_score}%
-                          </span>
-                        </div>
-                        
-                        <p style={{ fontSize: '0.8rem', color: 'var(--on-surface-variant)', margin: '0 0 12px 8px', lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                          {node.why_it_matters}
-                        </p>
-                        
-                        {/* Prerequisites tags */}
-                        {node.prerequisites.length > 0 && (
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', paddingLeft: '8px' }}>
-                            {node.prerequisites.map(pId => {
-                              const pNode = data.nodes.find(n => n.id === pId)
-                              return pNode ? (
-                                <span key={pId} style={{ fontSize: '10px', background: 'rgba(0,0,0,0.5)', padding: '2px 6px', borderRadius: '4px', color: '#aaa', border: '1px solid rgba(255,255,255,0.1)' }}>
-                                  Requires: {pNode.label}
-                                </span>
-                              ) : null
-                            })}
-                          </div>
-                        )}
+          <div style={{ position: 'relative', width: '100%', maxWidth: '800px', margin: '0 auto' }}>
+            
+            {/* Glowing Vertical Conduit timeline track */}
+            <div className="conduit-line" />
+            <div className="conduit-pulse" />
+            
+            <div className="timeline-container">
+              {data.nodes.map((node, i) => {
+                const isExpanded = !!expandedNodes[node.id]
+                const statusColor = COLORS[node.status]
+                const side = i % 2 === 0 ? 'left' : 'right'
+
+                return (
+                  <div key={node.id} className={`timeline-row ${side}`}>
+                    
+                    {/* Node Anchor Point directly on the central conduit */}
+                    <div 
+                      className="timeline-anchor" 
+                      style={{ 
+                        borderColor: statusColor, 
+                        boxShadow: `0 0 12px ${statusColor}`,
+                        background: isExpanded ? statusColor : 'var(--surface)'
+                      }} 
+                    />
+                    
+                    {/* Branch Horizontal Neon connector line */}
+                    <div 
+                      className="timeline-connector" 
+                      style={{ 
+                        background: `linear-gradient(${side === 'left' ? '270deg' : '90deg'}, ${statusColor}44 0%, transparent 100%)` 
+                      }} 
+                    />
+
+                    {/* Glassmorphic Cyber Topic Card */}
+                    <div 
+                      onClick={() => toggleExpand(node.id)}
+                      className="topic-card"
+                      style={{
+                        borderColor: isExpanded ? statusColor : 'var(--glass-border)',
+                        boxShadow: isExpanded 
+                          ? `0 0 25px ${statusColor}25, 0 12px 36px rgba(0,0,0,0.6)` 
+                          : `0 8px 24px rgba(0, 0, 0, 0.4)`,
+                        opacity: node.status === 'locked' ? 0.6 : 1
+                      }}
+                    >
+                      {/* Mastery Progress Ring */}
+                      <div style={{ position: 'absolute', top: '18px', right: '18px' }}>
+                        <svg width="34" height="34" viewBox="0 0 36 36" style={{ transform: 'rotate(-90deg)' }}>
+                          <circle cx="18" cy="18" r="14" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="3" />
+                          <circle 
+                            cx="18" 
+                            cy="18" 
+                            r="14" 
+                            fill="none" 
+                            stroke={statusColor} 
+                            strokeWidth="3" 
+                            strokeDasharray={`${node.mastery_score * 0.88}, 100`} 
+                            style={{ transition: 'stroke-dasharray 0.6s cubic-bezier(0.4, 0, 0.2, 1)' }}
+                          />
+                        </svg>
                       </div>
-                    )
-                  })}
-                </div>
-                
-              </div>
-            ))}
+
+                      {/* Header label & Chapter */}
+                      <div style={{ paddingRight: '40px' }}>
+                        <div style={{ 
+                          display: 'inline-block', 
+                          fontSize: '8px', 
+                          fontWeight: 800, 
+                          color: statusColor, 
+                          letterSpacing: '0.12em', 
+                          textTransform: 'uppercase', 
+                          marginBottom: '6px', 
+                          background: `${statusColor}10`, 
+                          padding: '2px 8px', 
+                          borderRadius: '4px', 
+                          border: `1px solid ${statusColor}25` 
+                        }}>
+                          {`Chapter ${(i+1).toString().padStart(2, '0')}`}
+                        </div>
+
+                        {/* Title */}
+                        <h3 style={{ fontSize: '1.1rem', margin: '4px 0 8px 0', fontFamily: 'var(--font-heading)', color: '#fff', fontWeight: 650 }}>
+                          {node.label}
+                        </h3>
+
+                        {/* Node Brief */}
+                        <div style={{ display: 'flex', gap: '12px', fontSize: '0.78rem', color: 'var(--on-surface-variant)', fontWeight: 500 }}>
+                          <span>⏱️ {node.estimated_time_minutes} mins</span>
+                          <span>🎯 {node.mastery_score}% Mastery</span>
+                        </div>
+                      </div>
+
+                      {/* Accordion Expand Action Indicator */}
+                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginTop: '12px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '10px', fontSize: '0.75rem', color: statusColor, fontWeight: 700 }}>
+                        <span style={{ marginRight: '6px' }}>{isExpanded ? 'Collapse Neural Branch' : 'Expand Neural Branch'}</span>
+                        <span style={{ transform: isExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', display: 'inline-block' }}>▼</span>
+                      </div>
+
+                      {/* Collapsible Content */}
+                      {isExpanded && (
+                        <div 
+                          onClick={e => e.stopPropagation()} // Prevent card collapse when clicking child buttons
+                          style={{ marginTop: '16px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '16px', cursor: 'default' }}
+                        >
+                          {/* Why it matters description */}
+                          <h4 style={{ fontSize: '0.76rem', textTransform: 'uppercase', color: 'var(--on-surface-variant)', letterSpacing: '0.08em', marginBottom: '8px' }}>💡 Chapter Importance</h4>
+                          <p style={{ fontSize: '0.82rem', lineHeight: 1.5, color: '#b9cacb', margin: '0 0 16px 0' }}>{node.why_it_matters}</p>
+
+                          {/* Subtopics Listing */}
+                          <h4 style={{ fontSize: '0.76rem', textTransform: 'uppercase', color: 'var(--on-surface-variant)', letterSpacing: '0.08em', marginBottom: '10px' }}>📁 Subtopic Roadmap</h4>
+                          
+                          {subtopicsLoading[node.id] ? (
+                            <div style={{ padding: '12px 0', textAlign: 'center' }}>
+                              <div className="spinner" style={{ width: 22, height: 22, margin: '0 auto 8px', borderWidth: 2 }} />
+                              <span style={{ fontSize: '10px', color: 'var(--primary)', fontWeight: 600 }}>FETCHING SUBTOPICS...</span>
+                            </div>
+                          ) : subtopicsData[node.id]?.length === 0 ? (
+                            <p style={{ fontSize: '0.8rem', color: 'var(--on-surface-variant)', margin: '0 0 16px 0' }}>No subtopic roadmaps discovered.</p>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px', position: 'relative', paddingLeft: '16px' }}>
+                              {/* Subtopic visual timeline rail */}
+                              <div style={{ position: 'absolute', left: '6px', top: '8px', bottom: '8px', width: '1px', borderLeft: '2px dotted rgba(255,255,255,0.15)' }} />
+
+                              {subtopicsData[node.id]?.map((sub) => (
+                                <div 
+                                  key={sub.id} 
+                                  style={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    justifyContent: 'space-between', 
+                                    padding: '8px 12px', 
+                                    background: 'rgba(0,0,0,0.2)', 
+                                    borderRadius: '10px', 
+                                    border: '1px solid rgba(255,255,255,0.03)' 
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', maxWidth: '75%' }}>
+                                    <span style={{ fontSize: '0.82rem', zIndex: 1 }}>{sub.is_completed ? '✅' : node.status === 'locked' ? '🔒' : '⚡'}</span>
+                                    <span style={{ fontSize: '0.82rem', color: sub.is_completed ? '#7dfc9f' : node.status === 'locked' ? 'var(--outline)' : '#fff', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      {sub.name}
+                                    </span>
+                                  </div>
+
+                                  {node.status !== 'locked' && (
+                                    <button
+                                      onClick={() => router.push(`/explain?q=${encodeURIComponent(sub.name)}`)}
+                                      style={{
+                                        background: 'rgba(0,242,255,0.08)',
+                                        border: '1px solid rgba(0,242,255,0.25)',
+                                        color: 'var(--primary)',
+                                        padding: '4px 10px',
+                                        borderRadius: '6px',
+                                        fontSize: '0.72rem',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s',
+                                        flexShrink: 0
+                                      }}
+                                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,242,255,0.16)'}
+                                      onMouseLeave={e => e.currentTarget.style.background = 'rgba(0,242,255,0.08)'}
+                                    >
+                                      Study 🔍
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Nova AI Tutor insights panel */}
+                          {node.status !== 'locked' && (
+                            <div style={{
+                              background: 'linear-gradient(135deg, rgba(119,1,208,0.12) 0%, rgba(0,242,255,0.05) 100%)',
+                              borderRadius: '14px',
+                              padding: '16px',
+                              border: '1px solid rgba(0,242,255,0.2)',
+                              boxShadow: '0 0 20px rgba(0,242,255,0.03)',
+                              marginBottom: '16px'
+                            }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                                <span style={{ fontSize: '18px' }}>✨</span>
+                                <h4 style={{ margin: 0, fontSize: '0.85rem', color: '#fff', fontFamily: 'var(--font-heading)', fontWeight: 600 }}>Nova AI Tutor Insights</h4>
+                              </div>
+
+                              {aiExplanations[node.id] ? (
+                                <div 
+                                  style={{ fontSize: '0.78rem', lineHeight: 1.5, color: '#e2f0f0', maxHeight: '120px', overflowY: 'auto', paddingRight: '6px' }}
+                                  dangerouslySetInnerHTML={{ __html: aiExplanations[node.id].replace(/\n/g, '<br/>') }}
+                                />
+                              ) : (
+                                <button
+                                  onClick={() => handleAiExplainForNode(node)}
+                                  disabled={aiLoadingState[node.id]}
+                                  style={{
+                                    width: '100%',
+                                    padding: '10px',
+                                    borderRadius: '8px',
+                                    background: 'rgba(0, 242, 255, 0.08)',
+                                    color: 'var(--primary)',
+                                    border: '1px solid rgba(0, 242, 255, 0.25)',
+                                    cursor: aiLoadingState[node.id] ? 'wait' : 'pointer',
+                                    fontWeight: 700,
+                                    fontSize: '0.78rem',
+                                    transition: 'all 0.2s'
+                                  }}
+                                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(0, 242, 255, 0.15)'}
+                                  onMouseLeave={e => e.currentTarget.style.background = 'rgba(0, 242, 255, 0.08)'}
+                                >
+                                  {aiLoadingState[node.id] ? 'Calibrating Quantum Insights...' : 'Analyze Knowledge Gap with AI'}
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Full Core explain button */}
+                          {node.status !== 'locked' && (
+                            <button 
+                              onClick={() => router.push(`/explain?q=${encodeURIComponent(node.label)}`)}
+                              style={{ 
+                                width: '100%', 
+                                padding: '12px', 
+                                borderRadius: '9999px', 
+                                background: statusColor, 
+                                color: '#000', 
+                                border: 'none', 
+                                cursor: 'pointer', 
+                                fontFamily: 'var(--font-heading)', 
+                                fontWeight: 800, 
+                                fontSize: '0.85rem', 
+                                transition: 'all 0.2s',
+                                boxShadow: `0 4px 15px ${statusColor}30`
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-2px)'}
+                              onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}
+                            >
+                              Explore Chapter Core 🚀
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
         )}
       </div>
 
-      {/* Selected Node Details Modal/Overlay */}
-      {selectedNode && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999,
-          background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(5px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px',
-          animation: 'fadeIn 0.2s ease'
-        }}>
-          <div style={{
-            background: 'var(--surface)', border: `1px solid ${COLORS[selectedNode.status]}`,
-            borderRadius: 'var(--radius-xl)', padding: '24px', width: '100%', maxWidth: '500px',
-            boxShadow: `0 20px 50px rgba(0,0,0,0.5)`, position: 'relative',
-            maxHeight: '85vh', overflowY: 'auto'
-          }}>
-            <button onClick={() => setSelectedNode(null)} style={{ position: 'absolute', top: '16px', right: '16px', background: 'none', border: 'none', color: '#fff', fontSize: '1.5rem', cursor: 'pointer' }}>×</button>
-            
-            <div style={{ display: 'inline-block', fontSize: '10px', color: COLORS[selectedNode.status], border: `1px solid ${COLORS[selectedNode.status]}40`, padding: '4px 8px', borderRadius: 'var(--radius-full)', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, marginBottom: '12px' }}>
-              {selectedNode.status.replace('-', ' ')}
-            </div>
-            
-            <h2 style={{ fontSize: '1.8rem', margin: '0 0 16px 0', color: '#fff' }}>{selectedNode.label}</h2>
-            
-            <div style={{ display: 'flex', gap: '20px', marginBottom: '24px', background: 'rgba(0,0,0,0.3)', padding: '12px', borderRadius: 'var(--radius-md)' }}>
-              <div>
-                <div style={{ fontSize: '10px', color: 'var(--on-surface-variant)' }}>MASTERY SCORE</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 700, color: COLORS[selectedNode.status] }}>{selectedNode.mastery_score}%</div>
-              </div>
-              <div>
-                <div style={{ fontSize: '10px', color: 'var(--on-surface-variant)' }}>EST. TIME</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 700, color: '#fff' }}>{selectedNode.estimated_time_minutes}m</div>
-              </div>
-            </div>
+      {/* Embedded CSS Styles */}
+      <style>{`
+        .map-page {
+          background: radial-gradient(circle at 50% 0%, #101c1c 0%, #050a0a 100%);
+          background-attachment: fixed;
+          position: relative;
+          overflow: hidden;
+        }
+        .map-page::before {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background-image: 
+            linear-gradient(rgba(0, 242, 255, 0.03) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(0, 242, 255, 0.03) 1px, transparent 1px);
+          background-size: 30px 30px;
+          pointer-events: none;
+          z-index: 0;
+        }
+        
+        .particle {
+          position: absolute;
+          border-radius: 50%;
+          background: var(--primary);
+          filter: blur(40px);
+          opacity: 0.07;
+          pointer-events: none;
+          z-index: 0;
+          animation: floatParticle 25s infinite linear;
+        }
+        
+        .conduit-line {
+          position: absolute;
+          left: 50%;
+          transform: translateX(-50%);
+          width: 4px;
+          top: 0;
+          bottom: 0;
+          background: linear-gradient(180deg, 
+            rgba(0,242,255,0.15) 0%, 
+            rgba(119,1,208,0.3) 50%, 
+            rgba(0,242,255,0.15) 100%
+          );
+          box-shadow: 0 0 10px rgba(0,242,255,0.1);
+          z-index: 1;
+        }
+        
+        .conduit-pulse {
+          position: absolute;
+          left: 50%;
+          transform: translateX(-50%);
+          width: 6px;
+          height: 120px;
+          background: linear-gradient(180deg, transparent, var(--primary), transparent);
+          animation: conduitFlow 6s infinite linear;
+          z-index: 2;
+        }
+        
+        .timeline-container {
+          position: relative;
+          width: 100%;
+          z-index: 2;
+          display: flex;
+          flex-direction: column;
+          gap: 50px;
+        }
+        
+        .timeline-row {
+          display: flex;
+          width: 100%;
+          position: relative;
+        }
+        
+        .timeline-row.left {
+          justify-content: flex-start;
+        }
+        
+        .timeline-row.right {
+          justify-content: flex-end;
+        }
+        
+        .timeline-anchor {
+          position: absolute;
+          left: 50%;
+          top: 36px;
+          transform: translate(-50%, -50%);
+          width: 18px;
+          height: 18px;
+          border-radius: 50%;
+          border: 4px solid var(--primary);
+          z-index: 4;
+          transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        
+        .timeline-connector {
+          position: absolute;
+          top: 36px;
+          height: 2px;
+          z-index: 1;
+        }
+        
+        .left .timeline-connector {
+          right: 50%;
+          left: calc(50% - 100px);
+          width: 100px;
+        }
+        
+        .right .timeline-connector {
+          left: 50%;
+          right: calc(50% - 100px);
+          width: 100px;
+        }
+        
+        .topic-card {
+          width: 44%;
+          background: rgba(13, 21, 21, 0.75);
+          backdrop-filter: blur(16px);
+          border: 1px solid var(--glass-border);
+          border-radius: 18px;
+          padding: 20px;
+          transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+          cursor: pointer;
+          position: relative;
+        }
+        
+        .topic-card:hover {
+          transform: translateY(-4px);
+          background: rgba(18, 28, 28, 0.85);
+        }
 
-            <h4 style={{ fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--on-surface-variant)', letterSpacing: '0.05em', marginBottom: '8px' }}>Why it matters</h4>
-            <p style={{ fontSize: '0.95rem', lineHeight: 1.6, color: '#e0e0e0', margin: '0 0 24px 0' }}>{selectedNode.why_it_matters}</p>
+        .spinner {
+          width: 32px;
+          height: 32px;
+          border: 3px solid rgba(0, 242, 255, 0.1);
+          border-top-color: var(--primary);
+          border-radius: 50%;
+          animation: spin 1s linear infinite;
+        }
 
-            {/* Blocking Prerequisites */}
-            {selectedNode.prerequisites.length > 0 && (
-              <div style={{ marginBottom: '24px' }}>
-                <h4 style={{ fontSize: '0.8rem', textTransform: 'uppercase', color: 'var(--on-surface-variant)', letterSpacing: '0.05em', marginBottom: '8px' }}>Prerequisites</h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {selectedNode.prerequisites.map(pId => {
-                    const pNode = data.nodes.find(n => n.id === pId)
-                    if (!pNode) return null
-                    const isBlocking = pNode.mastery_score < 80
-                    return (
-                      <div key={pId} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', background: 'rgba(255,255,255,0.05)', borderRadius: 'var(--radius-sm)', border: `1px solid ${isBlocking ? 'rgba(255,100,100,0.3)' : 'rgba(74,222,128,0.3)'}` }}>
-                        <span style={{ fontSize: '16px' }}>{isBlocking ? '🔒' : '✅'}</span>
-                        <span style={{ fontSize: '0.9rem', color: isBlocking ? '#ff6464' : '#4ade80' }}>{pNode.label}</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        
+        @keyframes conduitFlow {
+          0% { top: -120px; }
+          100% { top: 100%; }
+        }
+        
+        @keyframes floatParticle {
+          0%, 100% { transform: translateY(0) translateX(0) scale(1); }
+          50% { transform: translateY(-40px) translateX(20px) scale(1.1); }
+        }
 
-            {/* AI Assistant */}
-            <div style={{ marginBottom: '24px', background: 'linear-gradient(135deg, rgba(119,1,208,0.1), rgba(0,242,255,0.05))', borderRadius: 'var(--radius-lg)', padding: '16px', border: '1px solid rgba(119,1,208,0.3)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                <span style={{ fontSize: '20px' }}>✨</span>
-                <h4 style={{ margin: 0, fontSize: '0.9rem', color: '#fff' }}>AI Tutor</h4>
-              </div>
-              
-              {aiExplanation ? (
-                <div style={{ fontSize: '0.9rem', lineHeight: 1.6, color: '#e0e0e0' }}>{aiExplanation}</div>
-              ) : (
-                <button 
-                  onClick={handleAiExplain} disabled={aiLoading}
-                  style={{ width: '100%', padding: '12px', borderRadius: 'var(--radius-md)', background: 'var(--primary-container)', color: 'var(--primary)', border: 'none', cursor: aiLoading ? 'wait' : 'pointer', fontWeight: 600, fontSize: '0.9rem' }}
-                >
-                  {aiLoading ? 'Generating Micro-Lesson...' : 'Explain this gap to me'}
-                </button>
-              )}
-            </div>
-
-            <button 
-              onClick={() => router.push(`/explain?q=${encodeURIComponent(selectedNode.label)}`)}
-              style={{ width: '100%', padding: '16px', borderRadius: 'var(--radius-full)', background: COLORS[selectedNode.status], color: '#000', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-heading)', fontWeight: 700, fontSize: '1.1rem', transition: 'transform 0.2s' }}
-            >
-              Start Micro-Session 🚀
-            </button>
-          </div>
-        </div>
-      )}
+        @media (max-width: 768px) {
+          .conduit-line {
+            left: 20px;
+            transform: none;
+          }
+          .conduit-pulse {
+            left: 20px;
+            transform: none;
+          }
+          .timeline-anchor {
+            left: 20px;
+            transform: translateY(-50%) translateX(-50%);
+          }
+          .timeline-row.left, .timeline-row.right {
+            justify-content: flex-start;
+            padding-left: 45px;
+          }
+          .topic-card {
+            width: 100%;
+          }
+          .timeline-connector {
+            left: 20px !important;
+            width: 25px !important;
+            right: auto !important;
+          }
+        }
+      `}</style>
 
       <BottomNav />
     </div>

@@ -27,12 +27,163 @@ export default function DashboardPage() {
       .catch(() => setLoading(false))
   }, [token])
 
+  useEffect(() => {
+    const handleTick = () => {
+      setData(prev => {
+        if (!prev) return null
+        return {
+          ...prev,
+          stats: {
+            ...prev.stats,
+            today_study_time: prev.stats.today_study_time + 1
+          }
+        }
+      })
+    }
+
+    window.addEventListener('study-session-tick', handleTick)
+    return () => window.removeEventListener('study-session-tick', handleTick)
+  }, [])
+
   if (loading) return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ textAlign: 'center' }}>
-        <div className="spinner" style={{ margin: '0 auto 16px', width: 40, height: 40, borderWidth: 3 }}></div>
-        <p className="text-muted">Calibrating your dashboard...</p>
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'var(--surface)',
+      position: 'relative',
+      overflow: 'hidden',
+      color: 'var(--on-surface)'
+    }}>
+      {/* Background radial glow */}
+      <div style={{
+        position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+        width: '500px', height: '500px',
+        background: 'radial-gradient(circle, rgba(0,242,255,0.06) 0%, rgba(119,1,208,0.03) 50%, transparent 100%)',
+        pointerEvents: 'none', filter: 'blur(40px)'
+      }} />
+
+      <div style={{ position: 'relative', zIndex: 1, textAlign: 'center' }}>
+        {/* Futuristic 3D Quantum Atom Loader */}
+        <div style={{
+          position: 'relative',
+          width: '140px',
+          height: '140px',
+          margin: '0 auto 36px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          perspective: '800px'
+        }}>
+          {/* Glowing Quantum Core */}
+          <div style={{
+            position: 'absolute',
+            width: '32px',
+            height: '32px',
+            borderRadius: '50%',
+            background: 'radial-gradient(circle, #fff 0%, var(--primary) 40%, rgba(0,242,255,0.2) 100%)',
+            boxShadow: '0 0 35px var(--primary), 0 0 70px rgba(0,242,255,0.5)',
+            animation: 'core-pulse 1.8s infinite ease-in-out'
+          }} />
+
+          {/* Orbiting Particles */}
+          <div className="orbit orbit-cyan" />
+          <div className="orbit orbit-purple" />
+          <div className="orbit orbit-gold" />
+        </div>
+
+        {/* Dynamic Loading Text */}
+        <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 700, fontSize: '1.2rem', letterSpacing: '0.12em', marginBottom: '8px', color: '#fff' }}>
+          QUANTUM SYNCING
+        </div>
+        <div style={{ fontSize: '0.8rem', color: 'var(--on-surface-variant)', marginBottom: '24px', opacity: 0.75 }}>
+          Connecting to Student Verse matrix...
+        </div>
       </div>
+
+      {/* Embedded High-Fidelity Styles */}
+      <style>{`
+        .orbit {
+          position: absolute;
+          width: 120px;
+          height: 120px;
+          border: 1px dashed rgba(255, 255, 255, 0.08);
+          border-radius: 50%;
+        }
+        
+        .orbit-cyan {
+          border-color: rgba(0, 242, 255, 0.15);
+          transform: rotateX(70deg) rotateY(20deg);
+          animation: spin-cyan 4s linear infinite;
+        }
+        .orbit-cyan::after {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: 50%;
+          width: 8px;
+          height: 8px;
+          background: var(--primary);
+          border-radius: 50%;
+          box-shadow: 0 0 12px var(--primary), 0 0 4px #fff;
+          transform: translate(-50%, -50%);
+        }
+
+        .orbit-purple {
+          border-color: rgba(220, 184, 255, 0.15);
+          transform: rotateX(70deg) rotateY(-20deg) rotateZ(120deg);
+          animation: spin-purple 4s linear infinite;
+        }
+        .orbit-purple::after {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: 50%;
+          width: 8px;
+          height: 8px;
+          background: var(--secondary);
+          border-radius: 50%;
+          box-shadow: 0 0 12px var(--secondary), 0 0 4px #fff;
+          transform: translate(-50%, -50%);
+        }
+
+        .orbit-gold {
+          border-color: rgba(255, 184, 0, 0.15);
+          transform: rotateY(70deg) rotateX(20deg) rotateZ(240deg);
+          animation: spin-gold 4s linear infinite;
+        }
+        .orbit-gold::after {
+          content: '';
+          position: absolute;
+          top: 0;
+          left: 50%;
+          width: 8px;
+          height: 8px;
+          background: var(--tertiary);
+          border-radius: 50%;
+          box-shadow: 0 0 12px var(--tertiary), 0 0 4px #fff;
+          transform: translate(-50%, -50%);
+        }
+
+        @keyframes spin-cyan {
+          from { transform: rotateX(70deg) rotateY(20deg) rotateZ(0deg); }
+          to { transform: rotateX(70deg) rotateY(20deg) rotateZ(360deg); }
+        }
+        @keyframes spin-purple {
+          from { transform: rotateX(70deg) rotateY(-20deg) rotateZ(120deg) rotateZ(0deg); }
+          to { transform: rotateX(70deg) rotateY(-20deg) rotateZ(120deg) rotateZ(360deg); }
+        }
+        @keyframes spin-gold {
+          from { transform: rotateY(70deg) rotateX(20deg) rotateZ(240deg) rotateZ(0deg); }
+          to { transform: rotateY(70deg) rotateX(20deg) rotateZ(240deg) rotateZ(360deg); }
+        }
+        @keyframes core-pulse {
+          0%, 100% { transform: scale(0.9); opacity: 0.8; box-shadow: 0 0 25px var(--primary); }
+          50% { transform: scale(1.15); opacity: 1; box-shadow: 0 0 45px var(--primary), 0 0 15px #fff; }
+        }
+      `}</style>
     </div>
   )
 

@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { supabase, getAuthUser } from '@/lib/supabase'
+import { supabase, supabaseAdmin, getAuthUser } from '@/lib/supabase'
 import { successResponse, errorResponse, unauthorizedResponse, calculateXP } from '@/lib/utils'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -12,7 +12,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 
     const { id } = await params
 
-    const { data: topic, error } = await supabase
+    const { data: topic, error } = await supabaseAdmin
       .from('topics')
       .select('*, subjects(name, icon, color)')
       .eq('id', id)
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
 
     if (error || !topic) return errorResponse('Topic not found', 404)
 
-    const { data: progress } = await supabase
+    const { data: progress } = await supabaseAdmin
       .from('user_topic_progress')
       .select('*')
       .eq('user_id', user.id)
@@ -28,7 +28,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       .single()
 
     // Revision cards for this topic
-    const { data: cards } = await supabase
+    const { data: cards } = await supabaseAdmin
       .from('revision_cards')
       .select('id, front, back, difficulty, next_review_at')
       .eq('user_id', user.id)
@@ -52,8 +52,8 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
     // Fetch existing progress and profile XP in parallel
     const [existingRes, profileRes] = await Promise.all([
-      supabase.from('user_topic_progress').select('is_completed, study_time, mastery_level').eq('user_id', user.id).eq('topic_id', id).single(),
-      supabase.from('profiles').select('xp').eq('id', user.id).single()
+      supabaseAdmin.from('user_topic_progress').select('is_completed, study_time, mastery_level').eq('user_id', user.id).eq('topic_id', id).single(),
+      supabaseAdmin.from('profiles').select('xp').eq('id', user.id).single()
     ])
 
     const existing = existingRes.data
@@ -71,11 +71,11 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
     // Run upsert + optional side effects concurrently
     const ops: any[] = [
-      supabase.from('user_topic_progress').upsert(updateData, { onConflict: 'user_id,topic_id' })
+      supabaseAdmin.from('user_topic_progress').upsert(updateData, { onConflict: 'user_id,topic_id' })
     ]
 
     if (study_time && study_time > 0) {
-      ops.push(supabase.from('study_sessions').insert({
+      ops.push(supabaseAdmin.from('study_sessions').insert({
         user_id: user.id, subject_id, topic_id: id,
         duration: study_time,
         session_date: new Date().toISOString().split('T')[0]
@@ -84,7 +84,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
     if (isFirstComplete) {
       const xpGained = calculateXP('topic_complete')
-      ops.push(supabase.from('profiles').update({ xp: currentXP + xpGained }).eq('id', user.id))
+      ops.push(supabaseAdmin.from('profiles').update({ xp: currentXP + xpGained }).eq('id', user.id))
     }
 
     const results = await Promise.all(ops)

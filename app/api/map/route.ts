@@ -15,11 +15,14 @@ export async function GET(request: NextRequest) {
 
     const userClient = createUserClient(token)
 
-    // 1. Target subject (Physics)
-    const { data: subjectData } = await supabaseAdmin.from('subjects').select('id, name').eq('name', 'Physics').single()
+    const { searchParams } = new URL(request.url)
+    const subjectName = searchParams.get('subject') || 'Physics'
+
+    // 1. Target subject
+    const { data: subjectData } = await supabaseAdmin.from('subjects').select('id, name').eq('name', subjectName).single()
     const subjectId = subjectData?.id
 
-    console.log(`[MAP API] Subject search for Physics: ${subjectId ? 'FOUND' : 'NOT FOUND'}`)
+    console.log(`[MAP API] Subject search for ${subjectName}: ${subjectId ? 'FOUND' : 'NOT FOUND'}`)
 
     if (!subjectId) {
       // Fallback: try to get the first subject if Physics not found
@@ -79,25 +82,31 @@ export async function GET(request: NextRequest) {
        const p = progressMap.get(t.id)
        
        // Gap knowledge uses data of tests! We blend progress with test accuracy.
-       let mastery_score = p?.mastery_level || 0
+       let progress_level = p?.mastery_level || 0
+       if (p?.is_completed && progress_level === 0) {
+          progress_level = 100
+       }
+       
+       let mastery_score = progress_level
        
        if (attemptCount > 0) {
-           if (p?.is_completed) {
-              mastery_score = Math.round(60 + (avgAccuracy * 0.4)) // Scale up if completed
+           if (progress_level > 0) {
+              // Blend progress level with test accuracy
+              mastery_score = Math.round(progress_level * 0.7 + avgAccuracy * 0.3)
            } else {
-              // Gaps determined heavily by test accuracy, ensure minimum 15% so it's a 'gap' not 'locked'
-              mastery_score = Math.max(15, Math.round(avgAccuracy * 0.5)) 
+              // Not started yet
+              mastery_score = 0
            }
-       } else {
-           if (p?.is_completed) mastery_score = 100
        }
        
        // Determine status
        let status = 'locked'
-       if (mastery_score >= 80) status = 'mastered'
-       else if (mastery_score >= 40) status = 'in-progress'
-       else if (i === 0 || progressMap.get(topicList[i-1].id)?.is_completed || mastery_score > 0) {
-           status = 'gap' // It's accessible, but score is low -> Knowledge Gap!
+       if (mastery_score >= 80) {
+           status = 'mastered'
+       } else if (mastery_score >= 40) {
+           status = 'in-progress'
+       } else if (i === 0 || (i > 0 && progressMap.get(topicList[i-1].id)?.is_completed)) {
+           status = 'gap' // Accessible, but not studied/passed -> Knowledge Gap!
        }
 
        nodes.push({

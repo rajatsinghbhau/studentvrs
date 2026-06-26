@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap');
 
 /* ============================================================
-   NEO-QUANTUM DESIGN SYSTEM — STUDENTVERSE AI
+   NEO-QUANTUM DESIGN SYSTEM — STUDENT VERSE AI
    ============================================================ */
 :root {
   /* Colors */
@@ -569,6 +569,130 @@ a:hover { opacity: 0.8; }
 .text-xs { font-size: 0.75rem; }
 .font-heading { font-family: var(--font-heading); }
 .font-bold { font-weight: 700; }
+.font-bold { font-weight: 700; }
 .w-full { width: 100%; }
 .relative { position: relative; }
 .overflow-hidden { overflow: hidden; }
+
+/* ============================================================
+   3D PERSPECTIVE & TRANSITIONS
+   ============================================================ */
+.perspective-container {
+  perspective: 1200px;
+  perspective-origin: 50% 50%;
+  transform-style: preserve-3d;
+}
+
+.preserve-3d {
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+}
+
+.transition-active {
+  transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.8s cubic-bezier(0.4, 0, 0.2, 1), filter 0.8s ease;
+}
+
+/* 3D Exit: rotates away into background */
+.exit-3d {
+  transform: perspective(1200px) rotateY(-180deg) translateZ(-400px) scale(0.9);
+  opacity: 0;
+  filter: blur(8px);
+  pointer-events: none;
+}
+
+/* 3D Entry: rotates into view from opposite direction */
+.enter-3d-active {
+  animation: professionalFlipIn 0.8s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+@keyframes professionalFlipIn {
+  0% {
+    transform: perspective(1200px) rotateY(180deg) translateZ(-400px) scale(0.9);
+    opacity: 0;
+    filter: blur(8px);
+  }
+  100% {
+    transform: perspective(1200px) rotateY(0deg) translateZ(0px) scale(1);
+    opacity: 1;
+    filter: none;
+  }
+}
+
+/* Professional High-Tech Grid and Orbits */
+.fine-blueprint-grid {
+  position: absolute;
+  inset: 0;
+  background-image: 
+    linear-gradient(rgba(0, 242, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 242, 255, 0.02) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.glow-nebula {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.08;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Precise Radial Tech Dials */
+.tech-dial-ring {
+  border: 1px dashed rgba(0, 242, 255, 0.15);
+  border-radius: 50%;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(0deg);
+  pointer-events: none;
+}
+
+.orbit-node {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: var(--primary);
+  border-radius: 50%;
+  box-shadow: 0 0 10px var(--primary);
+}
+
+.orbit-label {
+  position: absolute;
+  font-family: var(--font-heading);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--on-surface-variant);
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+/* Cinematic Portal Zoom 3D Transition */
+.exit-portal-zoom {
+  transform: perspective(1200px) translateZ(800px) rotateX(15deg) scale(3.5);
+  opacity: 0;
+  filter: blur(12px);
+  pointer-events: none;
+  transition: transform 0.8s cubic-bezier(0.7, 0, 0.2, 1), opacity 0.7s ease, filter 0.8s ease;
+}
+
+.enter-portal-zoom-active {
+  animation: portalZoomIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes portalZoomIn {
+  0% {
+    transform: perspective(1200px) translateZ(-800px) scale(0.2);
+    opacity: 0;
+    filter: blur(10px);
+  }
+  100% {
+    transform: perspective(1200px) translateZ(0deg) scale(1);
+    opacity: 1;
+    filter: none;
+  }
+}
+
+

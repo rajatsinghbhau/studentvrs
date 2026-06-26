@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { supabase, supabaseAdmin, getAuthUser } from '@/lib/supabase'
-import { successResponse, errorResponse, unauthorizedResponse, calculateXP } from '@/lib/utils'
+import { successResponse, errorResponse, unauthorizedResponse, calculateXP, calculateLevel } from '@/lib/utils'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -11,7 +11,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     if (!user) return unauthorizedResponse()
 
     const { id } = await params
-    const { is_completed, topic_id } = await request.json()
+    const { is_completed, topic_id, subject_id } = await request.json()
 
     // Use supabaseAdmin for all user-data reads/writes on server side.
     // The anon client doesn't attach the user JWT to DB calls, so auth.uid()
@@ -50,14 +50,31 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
       return errorResponse(upsertErr.message, 500)
     }
 
-    // Award XP for first completion
+    // Award XP and log study session for first completion
     let xpGained = 0
     if (isFirstComplete) {
       xpGained = calculateXP('topic_complete')
-      await supabaseAdmin
-        .from('profiles')
-        .update({ xp: currentXP + xpGained })
-        .eq('id', user.id)
+      const newXP = currentXP + xpGained
+      const { level: newLevel, title: newTitle } = calculateLevel(newXP)
+      
+      const dbOps = [
+        supabaseAdmin
+          .from('profiles')
+          .update({ 
+            xp: newXP,
+            level: newLevel,
+            rank_title: newTitle
+          })
+          .eq('id', user.id),
+        supabaseAdmin.from('study_sessions').insert({
+          user_id: user.id,
+          subject_id: subject_id || null,
+          topic_id: topic_id || null,
+          duration: 15,
+          session_date: new Date().toISOString().split('T')[0]
+        })
+      ]
+      await Promise.all(dbOps)
     }
 
     // Update parent topic progress when topic_id provided

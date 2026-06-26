@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { supabase, getAuthUser, createUserClient } from '@/lib/supabase'
-import { successResponse, errorResponse, unauthorizedResponse, calculateXP } from '@/lib/utils'
+import { successResponse, errorResponse, unauthorizedResponse, calculateXP, calculateLevel } from '@/lib/utils'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -142,6 +142,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       const percentile = Math.max(1, Math.min(99, Math.round(50 + (score / safeMaxMarks) * 45)))
       const xpGained = calculateXP('test_complete', accuracy)
 
+      // Calculate new level and rank title
+      const newXP = (profileRes.data?.xp || 0) + xpGained
+      const { level: newLevel, title: newTitle } = calculateLevel(newXP)
+
       // Fire all DB writes in parallel
       const writeOps: any[] = [
         userClient.from('attempt_answers').insert(answerRecords),
@@ -157,7 +161,17 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
           status: 'COMPLETED',
           completed_at: new Date().toISOString()
         }).eq('id', resolvedAttemptId),
-        userClient.from('profiles').update({ xp: (profileRes.data?.xp || 0) + xpGained }).eq('id', user.id)
+        userClient.from('profiles').update({ 
+          xp: newXP,
+          level: newLevel,
+          rank_title: newTitle
+        }).eq('id', user.id),
+        userClient.from('study_sessions').insert({
+          user_id: user.id,
+          subject_id: test.subject_id,
+          duration: Math.max(1, Math.round((time_taken || 0) / 60)),
+          session_date: new Date().toISOString().split('T')[0]
+        })
       ]
 
       // Auto-generate revision cards for wrong-answer topics

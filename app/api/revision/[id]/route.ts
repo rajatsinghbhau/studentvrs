@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { supabase, getAuthUser } from '@/lib/supabase'
-import { successResponse, errorResponse, unauthorizedResponse, calculateNextReview } from '@/lib/utils'
+import { successResponse, errorResponse, unauthorizedResponse, calculateNextReview, calculateLevel } from '@/lib/utils'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -33,6 +33,8 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     )
 
     // Update card and award XP in parallel
+    const newXP = (profileRes.data?.xp || 0) + 20
+    const { level: newLevel, title: newTitle } = calculateLevel(newXP)
     const [updatedRes] = await Promise.all([
       supabase.from('revision_cards').update({
         interval_days: interval,
@@ -41,7 +43,11 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
         next_review_at: nextReviewAt.toISOString(),
         last_reviewed: new Date().toISOString()
       }).eq('id', id).select().single(),
-      supabase.from('profiles').update({ xp: (profileRes.data?.xp || 0) + 20 }).eq('id', user.id)
+      supabase.from('profiles').update({ 
+        xp: newXP,
+        level: newLevel,
+        rank_title: newTitle
+      }).eq('id', user.id)
     ])
 
     return successResponse({

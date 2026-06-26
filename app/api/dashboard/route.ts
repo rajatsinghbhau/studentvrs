@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { supabase, getAuthUser, createUserClient } from '@/lib/supabase'
-import { successResponse, errorResponse, unauthorizedResponse } from '@/lib/utils'
+import { successResponse, errorResponse, unauthorizedResponse, calculateLevel } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
 
@@ -62,7 +62,7 @@ export async function GET(request: NextRequest) {
     // XP levels
     const xpThresholds = [0, 500, 1500, 3000, 5000, 8000, 12000, 18000, 25000]
     const currentXP = profile?.xp || 0
-    const currentLevel = profile?.level || 1
+    const { level: currentLevel, title: rankTitle } = calculateLevel(currentXP)
     const nextLevelXP = xpThresholds[Math.min(currentLevel, xpThresholds.length - 1)] || 25000
     const prevLevelXP = xpThresholds[Math.max(currentLevel - 1, 0)] || 0
     const xpProgress = nextLevelXP > prevLevelXP
@@ -87,7 +87,7 @@ export async function GET(request: NextRequest) {
         longest_streak: profile?.longest_streak || 0,
         xp: currentXP,
         level: currentLevel,
-        rank_title: profile?.rank_title || 'Rookie',
+        rank_title: rankTitle,
         xp_progress: Math.min(xpProgress, 100),
         xp_to_next_level: Math.max(nextLevelXP - currentXP, 0)
       },

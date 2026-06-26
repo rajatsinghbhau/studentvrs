@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { supabase } from '@/lib/supabase'
-import { successResponse, errorResponse } from '@/lib/utils'
+import { successResponse, errorResponse, calculateLevel } from '@/lib/utils'
 
 export async function POST(request: NextRequest) {
   try {
@@ -22,6 +22,9 @@ export async function POST(request: NextRequest) {
       .eq('id', data.user.id)
       .single()
 
+    let userXP = profile?.xp || 0
+    let userStreak = profile?.streak || 0
+
     // Update streak logic
     if (profile) {
       const today = new Date().toISOString().split('T')[0]
@@ -31,17 +34,26 @@ export async function POST(request: NextRequest) {
         const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0]
         const newStreak = lastLogin === yesterday ? (profile.streak || 0) + 1 : 1
         const longestStreak = Math.max(profile.longest_streak || 0, newStreak)
+        const newXP = (profile.xp || 0) + 10
+        const { level: newLevel, title: newTitle } = calculateLevel(newXP)
         
+        userXP = newXP
+        userStreak = newStreak
+
         await supabase
           .from('profiles')
           .update({ 
             streak: newStreak, 
             longest_streak: longestStreak,
-            xp: (profile.xp || 0) + 10 
+            xp: newXP,
+            level: newLevel,
+            rank_title: newTitle
           })
           .eq('id', data.user.id)
       }
     }
+
+    const { level: userLevel } = calculateLevel(userXP)
 
     return successResponse({
       user: {
@@ -49,9 +61,9 @@ export async function POST(request: NextRequest) {
         email: data.user.email,
         name: profile?.name,
         avatar_url: profile?.avatar_url,
-        level: profile?.level,
-        xp: profile?.xp,
-        streak: profile?.streak,
+        level: userLevel,
+        xp: userXP,
+        streak: userStreak,
         onboarding_done: profile?.onboarding_done,
       },
       session: {

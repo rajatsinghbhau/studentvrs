@@ -19,6 +19,7 @@ interface Chapter {          // = a "topic" row in DB
   weightage: number
   subtopics: Subtopic[] | null   // null = not yet loaded
   loadingSubtopics: boolean
+  initialProgress: number
 }
 
 interface Subject {
@@ -186,7 +187,7 @@ function ChapterCard({
 
   const subs = chapter.subtopics ?? []
   const prog = subs.length > 0 ? subtopicProgress(subs) : null
-  const pct = prog?.pct ?? (chapter.subtopics === null ? null : 0)
+  const pct = prog !== null ? prog.pct : chapter.initialProgress
   const allDone = pct === 100
 
   return (
@@ -370,6 +371,7 @@ export default function LearnPage() {
             weightage: t.weightage,
             subtopics: existing?.subtopics ?? null,          // preserve loaded subtopics
             loadingSubtopics: existing?.loadingSubtopics ?? false,
+            initialProgress: t.progress?.mastery_level ?? 0,
           }
         })
     })
