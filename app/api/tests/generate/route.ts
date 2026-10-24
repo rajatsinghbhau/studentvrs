@@ -78,14 +78,48 @@ Rules:
 - Questions should test deep understanding, not just memorisation
 - Use proper scientific notation where needed${avoidContext}`
 
-    const completion = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.7,
-      max_tokens: 6000,
-    })
+    const TEST_MODEL_CHAIN = [
+      'qwen/qwen3.8-27b',
+      'openai/gpt-oss-120b',
+      'openai/gpt-oss-20b',
+      'llama-3.3-70b-versatile',
+      'llama-3.1-8b-instant',
+    ]
 
-    const rawText = completion.choices[0]?.message?.content?.trim() || ''
+    let rawText = ''
+    let lastError: any = null
+
+    for (const model of TEST_MODEL_CHAIN) {
+      try {
+        const completion = await groq.chat.completions.create({
+          model,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.7,
+          max_tokens: 6000,
+        })
+        rawText = completion.choices[0]?.message?.content?.trim() || ''
+        if (rawText) break
+      } catch (err: any) {
+        lastError = err
+        const isQuotaOrUnavailable =
+          err.status === 429 ||
+          err.status === 404 ||
+          err.message?.includes('rate_limit') ||
+          err.message?.includes('quota') ||
+          err.message?.includes('does not exist') ||
+          err.message?.includes('model_not_found')
+        if (isQuotaOrUnavailable) {
+          console.warn(`[Groq Test Gen] Model ${model} skipped (${err.message}), trying fallback...`)
+          continue
+        }
+        throw err
+      }
+    }
+
+    if (!rawText) {
+      console.error('All test generation models failed:', lastError)
+      return errorResponse('Failed to generate test with AI models. Please try again later.', 500)
+    }
 
     // Robustly extract JSON array
     let questions: any[]

@@ -1,14 +1,16 @@
 import Groq from 'groq-sdk'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY!,
 })
 
-// Current Groq models
-// Primary = better quality
-// Fallback = faster/smaller
+const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null
+
+// Current Groq models (Primary = best quality, Fallback = fast/efficient)
 const MODEL_CHAIN = [
   'openai/gpt-oss-120b',
+  'qwen/qwen3.8-27b',
   'openai/gpt-oss-20b',
 ]
 
@@ -121,7 +123,8 @@ Guidelines:
 
       const isModelError =
         err?.status === 404 ||
-        err?.message?.toLowerCase()?.includes('model_not_found')
+        err?.message?.toLowerCase()?.includes('model_not_found') ||
+        err?.message?.toLowerCase()?.includes('does not exist')
 
       if (isModelError) {
         console.warn(
@@ -135,6 +138,29 @@ Guidelines:
         `[Groq] ${model} failed. Trying next model...`
       )
       continue
+    }
+  }
+
+  // Fallback to Google Gemini (gemini-2.5-flash) if all Groq models are exhausted
+  if (genAI) {
+    try {
+      console.log('[AI Fallback] Groq models unavailable or rate-limited. Falling back to Google Gemini...');
+      const geminiModel = genAI.getGenerativeModel({
+        model: 'gemini-2.5-flash',
+        systemInstruction: systemPrompt,
+      })
+
+      const contents = history.map(msg => ({
+        role: msg.role === 'user' ? 'user' : 'model',
+        parts: [{ text: msg.content }]
+      }))
+      contents.push({ role: 'user', parts: [{ text: userMessage }] })
+
+      const result = await geminiModel.generateContent({ contents })
+      const text = result.response.text()
+      if (text) return text
+    } catch (geminiErr: any) {
+      console.warn('[Gemini Fallback Error]:', geminiErr.message)
     }
   }
 

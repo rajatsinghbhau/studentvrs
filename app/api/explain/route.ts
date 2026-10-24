@@ -12,6 +12,7 @@ const groq = new Groq({
 // Current Groq models
 const MODEL_CHAIN = [
   'openai/gpt-oss-120b',
+  'qwen/qwen3.8-27b',
   'openai/gpt-oss-20b',
 ]
 
@@ -59,30 +60,28 @@ async function searchYouTube(
         viewCount: v.viewCount,
       }))
     } catch {
-      continue
+      continue // try next instance
     }
   }
 
-  return []
+  return [] // all instances failed — page will show fallback
 }
 
 function fmtDuration(s: number) {
+  if (!s) return ''
   const m = Math.floor(s / 60)
   const sec = s % 60
-
   return `${m}:${sec.toString().padStart(2, '0')}`
 }
 
 export async function POST(request: NextRequest) {
   try {
-    // Check authentication
     const user = await getAuthUser(request)
 
     if (!user) {
       return unauthorizedResponse()
     }
 
-    // Read request body
     const { query } = await request.json()
 
     if (!query?.trim()) {
@@ -92,7 +91,6 @@ export async function POST(request: NextRequest) {
     const prompt = `You are an expert JEE/NEET teacher. A student asked: "${query.trim()}"
 
 Generate a comprehensive explanation in this EXACT JSON format:
-
 {
   "title": "Clear topic title",
   "subject": "Physics|Chemistry|Mathematics|Biology|General",
@@ -184,7 +182,8 @@ IMPORTANT:
 
         const isQuota =
           err?.status === 429 ||
-          err?.message?.toLowerCase()?.includes('rate_limit')
+          err?.message?.toLowerCase()?.includes('rate_limit') ||
+          err?.message?.toLowerCase()?.includes('quota')
 
         if (isQuota) {
           console.warn(`[Groq] ${model} rate-limited. Trying next model...`)
@@ -194,7 +193,8 @@ IMPORTANT:
         // If the model is unavailable, try the next model
         const isModelError =
           err?.status === 404 ||
-          err?.message?.toLowerCase()?.includes('model_not_found')
+          err?.message?.toLowerCase()?.includes('model_not_found') ||
+          err?.message?.toLowerCase()?.includes('does not exist')
 
         if (isModelError) {
           console.warn(
